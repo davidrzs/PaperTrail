@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}{{ paper.title }} - PaperTrail{% endblock %}
+
+{% block content %}
+<div class="paper-detail">
+    <!-- Paper metadata -->
+    <div class="paper-meta">
+        <span class="meta-item">
+            by <a href="/users/{{ paper.user.username }}">{{ paper.user.display_name or paper.user.username }}</a>
+        </span>
+        {% if paper.date_read %}
+        <span class="meta-item">read {{ paper.date_read.strftime('%d-%m-%Y') }}</span>
+        {% endif %}
+        <span class="meta-item">{{ paper.created_at.strftime('%d-%m-%Y') }}</span>
+        {% if paper.is_private %}
+        <span class="meta-item private-badge">[private]</span>
+        {% endif %}
+        {% if is_owner %}
+        <span class="meta-item">
+            <a href="/papers/{{ paper.id }}/edit">edit</a>
+        </span>
+        <span class="meta-item">
+            <a href="#" onclick="if(confirm('Delete this paper?')) { fetch('/papers/{{ paper.id }}', {method: 'DELETE'}).then(() => window.location.href = '/'); } return false;">delete</a>
+        </span>
+        {% endif %}
+    </div>
+
+    <!-- Paper title -->
+    <h1>{{ paper.title }}</h1>
+
+    <!-- Authors -->
+    <p class="authors">{{ paper.authors }}</p>
+
+    <!-- Links -->
+    <div class="paper-links">
+        {% if paper.arxiv_id %}
+        <a href="https://arxiv.org/abs/{{ paper.arxiv_id }}" target="_blank">arXiv:{{ paper.arxiv_id }}</a>
+        {% endif %}
+        {% if paper.doi %}
+        <a href="https://doi.org/{{ paper.doi }}" target="_blank">DOI</a>
+        {% endif %}
+        {% if paper.paper_url %}
+        <a href="{{ paper.paper_url }}" target="_blank">paper</a>
+        {% endif %}
+    </div>
+
+    <!-- Tags -->
+    {% if paper.tags %}
+    <div class="tags">
+        {% for tag in paper.tags %}
+        <a href="/papers?tag={{ tag.name }}" class="tag">{{ tag.name }}</a>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Abstract -->
+    {% if paper.abstract %}
+    <div class="section">
+        <h2>Abstract</h2>
+        <p class="abstract">{{ paper.abstract }}</p>
+    </div>
+    {% endif %}
+
+    <!-- Summary -->
+    <div class="section">
+        <h2>Summary</h2>
+        <p class="summary">{{ paper.summary }}</p>
+    </div>
+
+    <!-- Back link -->
+    <div class="back-link">
+        <a href="#" onclick="history.back(); return false;">← back</a>
+    </div>
+</div>
+{% endblock %}

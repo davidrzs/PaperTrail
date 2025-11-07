@@ -1,0 +1,59 @@
+{% if papers %}
+    {% for paper in papers %}
+    <div class="paper-card">
+        <!-- Title and Links -->
+        <div class="paper-header">
+            <h3 class="paper-title"><a href="/papers/{{ paper.id }}">{{ paper.title }}</a></h3>
+            <div class="paper-links">
+                {% if paper.arxiv_id %}
+                <a href="https://arxiv.org/abs/{{ paper.arxiv_id }}" target="_blank" class="paper-link">arXiv</a>
+                {% endif %}
+                {% if paper.doi %}
+                <a href="https://doi.org/{{ paper.doi }}" target="_blank" class="paper-link">DOI</a>
+                {% endif %}
+                {% if paper.paper_url %}
+                <a href="{{ paper.paper_url }}" target="_blank" class="paper-link">Paper</a>
+                {% endif %}
+                <a href="/papers/{{ paper.id }}" class="paper-link">View</a>
+            </div>
+        </div>
+
+        <!-- Authors and Metadata -->
+        <div class="paper-meta">
+            <span class="authors">{{ paper.authors }}</span>
+            <span class="meta-separator">•</span>
+            <span class="meta-item">by <a href="/users/{{ paper.user.username }}/feed">{{ paper.user.display_name or paper.user.username }}</a></span>
+            {% if paper.date_read %}
+            <span class="meta-separator">•</span>
+            <span class="date">{{ paper.date_read.strftime('%d-%m-%Y') }}</span>
+            {% endif %}
+            {% if paper.is_private %}
+            <span class="meta-separator">•</span>
+            <span class="private-badge">Private</span>
+            {% endif %}
+            {% if current_user and current_user.id == paper.user_id and show_actions %}
+            <span class="meta-separator">•</span>
+            <a href="/papers/{{ paper.id }}/edit" class="action-link">edit</a>
+            <span class="meta-separator">•</span>
+            <a href="#" onclick="if(confirm('Delete this paper?')) { fetch('/papers/{{ paper.id }}', {method: 'DELETE'}).then(() => window.location.reload()); } return false;" class="action-link delete-link">delete</a>
+            {% endif %}
+        </div>
+
+        <!-- Tags -->
+        {% if paper.tags %}
+        <div class="paper-tags">
+            {% for tag in paper.tags %}
+            <span class="tag">{{ tag.name }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Summary -->
+        <div class="paper-summary">
+            {{ paper.summary }}
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+    <p class="subtext">No papers found.</p>
+{% endif %}

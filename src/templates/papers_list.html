@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}{{ filter_info }} - PaperTrail{% endblock %}
+
+{% block content %}
+<div class="papers-list">
+    <h2>{{ filter_info }}</h2>
+    <p class="subtext">{{ total }} papers found</p>
+
+    {% set show_actions = False %}
+    {% include "_paper_list.html" %}
+</div>
+{% endblock %}

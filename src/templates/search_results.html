@@ -1,0 +1,17 @@
+<div class="papers-list">
+    {% if results %}
+        <div class="search-info">
+            <h2>Search Results</h2>
+            <p class="subtext">Found {{ total }} papers for "{{ query }}"</p>
+        </div>
+
+        {% set papers = results %}
+        {% set show_actions = False %}
+        {% include "_paper_list.html" %}
+    {% else %}
+        <div class="no-results">
+            <h2>No Results</h2>
+            <p class="subtext">No papers found for "{{ query }}"</p>
+        </div>
+    {% endif %}
+</div>

@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Register - PaperTrail{% endblock %}
+
+{% block content %}
+<div class="form-container narrow">
+    <h2>Register</h2>
+
+    <div id="error-message" class="error-box" style="display: none;"></div>
+
+    <form id="register-form">
+        <div class="form-field">
+            <label for="username" class="form-label">Username:</label>
+            <input type="text" id="username" name="username" required class="form-input">
+        </div>
+
+        <div class="form-field">
+            <label for="email" class="form-label">Email:</label>
+            <input type="email" id="email" name="email" required class="form-input">
+        </div>
+
+        <div class="form-field">
+            <label for="display_name" class="form-label">Display Name (optional):</label>
+            <input type="text" id="display_name" name="display_name" class="form-input">
+        </div>
+
+        <div class="form-field">
+            <label for="password" class="form-label">Password:</label>
+            <input type="password" id="password" name="password" required class="form-input">
+        </div>
+
+        <button type="submit" class="btn">Register</button>
+
+        <p class="form-helper-text">
+            Already have an account? <a href="/login">Login here</a>
+        </p>
+    </form>
+</div>
+
+<script>
+document.getElementById('register-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const username = document.getElementById('username').value;
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    const display_name = document.getElementById('display_name').value;
+    const errorDiv = document.getElementById('error-message');
+
+    try {
+        const payload = {
+            username: username,
+            email: email,
+            password: password
+        };
+
+        if (display_name) {
+            payload.display_name = display_name;
+        }
+
+        const response = await fetch('/auth/register', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+            // Cookie is set automatically, just redirect
+            window.location.href = '/';
+        } else {
+            const error = await response.json();
+            // Handle error message properly
+            let errorMessage = 'Registration failed';
+            if (error.detail) {
+                if (typeof error.detail === 'string') {
+                    errorMessage = error.detail;
+                } else if (Array.isArray(error.detail)) {
+                    // Pydantic validation errors
+                    errorMessage = error.detail.map(e => {
+                        const field = e.loc ? e.loc[e.loc.length - 1] : 'Field';
+                        const msg = e.msg || e.message || 'Invalid value';
+                        return `${field}: ${msg}`;
+                    }).join('; ');
+                } else {
+                    errorMessage = JSON.stringify(error.detail);
+                }
+            }
+            errorDiv.textContent = errorMessage;
+            errorDiv.style.display = 'block';
+        }
+    } catch (error) {
+        errorDiv.textContent = 'Network error. Please try again.';
+        errorDiv.style.display = 'block';
+    }
+});
+</script>
+{% endblock %}

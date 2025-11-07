@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - PaperTrail{% endblock %}
+
+{% block content %}
+<div class="form-container medium">
+    <h2>Settings</h2>
+
+    <div id="success-message" class="success-box" style="display: none;"></div>
+    <div id="error-message" class="error-box" style="display: none;"></div>
+
+    <form id="settings-form">
+        <div class="form-field">
+            <label for="display_name" class="form-label">Display Name:</label>
+            <input type="text" id="display_name" name="display_name" class="form-input">
+        </div>
+
+        <div class="form-field">
+            <label for="bio" class="form-label">About / Bio:</label>
+            <textarea id="bio" name="bio" rows="4" placeholder="Tell people about your paper collection..." class="form-textarea"></textarea>
+            <p style="margin-top: 8px; color: #6c757d; font-size: 14px;">Markdown supported. This will appear at the top of your paper list.</p>
+
+            <div style="margin-top: 16px;">
+                <label class="form-label">Preview:</label>
+                <div id="bio-preview" style="padding: 12px; background: #f8f9fa; border-radius: 6px; min-height: 60px; color: #495057;"></div>
+            </div>
+        </div>
+
+        <div class="form-field">
+            <label class="checkbox-label">
+                <input type="checkbox" id="show_heatmap" name="show_heatmap">
+                <span class="form-label">Display reading activity heatmap on my feed</span>
+            </label>
+        </div>
+
+        <button type="submit" class="btn">Save Settings</button>
+    </form>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+<script>
+// Load current user data
+fetch('/auth/me')
+    .then(res => res.ok ? res.json() : null)
+    .then(user => {
+        if (user) {
+            document.getElementById('display_name').value = user.display_name || '';
+            document.getElementById('bio').value = user.bio || '';
+            document.getElementById('show_heatmap').checked = user.show_heatmap !== false;
+            updateBioPreview();
+        }
+    });
+
+// Update preview as user types
+function updateBioPreview() {
+    const bioText = document.getElementById('bio').value;
+    const preview = document.getElementById('bio-preview');
+    if (bioText) {
+        preview.innerHTML = marked.parse(bioText);
+    } else {
+        preview.innerHTML = '<span style="color: #adb5bd;">Preview will appear here...</span>';
+    }
+}
+
+document.getElementById('bio').addEventListener('input', updateBioPreview);
+
+document.getElementById('settings-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const displayName = document.getElementById('display_name').value;
+    const bio = document.getElementById('bio').value;
+    const showHeatmap = document.getElementById('show_heatmap').checked;
+    const errorDiv = document.getElementById('error-message');
+    const successDiv = document.getElementById('success-message');
+
+    // Hide previous messages
+    errorDiv.style.display = 'none';
+    successDiv.style.display = 'none';
+
+    try {
+        const response = await fetch('/auth/me', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                display_name: displayName || null,
+                bio: bio || null,
+                show_heatmap: showHeatmap
+            })
+        });
+
+        if (response.ok) {
+            successDiv.textContent = 'Settings saved successfully!';
+            successDiv.style.display = 'block';
+        } else {
+            const error = await response.json();
+            // Handle error message properly
+            let errorMessage = 'Failed to save settings';
+            if (error.detail) {
+                if (typeof error.detail === 'string') {
+                    errorMessage = error.detail;
+                } else if (Array.isArray(error.detail)) {
+                    // Pydantic validation errors
+                    errorMessage = error.detail.map(e => {
+                        const field = e.loc ? e.loc[e.loc.length - 1] : 'Field';
+                        const msg = e.msg || e.message || 'Invalid value';
+                        return `${field}: ${msg}`;
+                    }).join('; ');
+                } else {
+                    errorMessage = JSON.stringify(error.detail);
+                }
+            }
+            errorDiv.textContent = errorMessage;
+            errorDiv.style.display = 'block';
+        }
+    } catch (error) {
+        errorDiv.textContent = 'Network error. Please try again.';
+        errorDiv.style.display = 'block';
+    }
+});
+</script>
+{% endblock %}

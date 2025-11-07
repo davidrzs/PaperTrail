@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}{{ user.display_name or user.username }}'s Papers - PaperTrail{% endblock %}
+
+{% block content %}
+<div class="user-feed-header">
+    <h2>{{ user.display_name or user.username }}</h2>
+    <a href="/users/{{ user.username }}/feed.xml" class="btn-outline">RSS Feed</a>
+</div>
+
+{% if user.bio %}
+<div class="user-bio">
+    <div id="bio-content"></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+<script>
+    const bioText = {{ user.bio | tojson }};
+    const bioContent = document.getElementById('bio-content');
+    bioContent.innerHTML = marked.parse(bioText);
+
+    // Render KaTeX in the bio when it's loaded
+    if (typeof renderMathInElement !== 'undefined') {
+        renderMathInElement(bioContent, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false},
+                {left: '\\[', right: '\\]', display: true},
+                {left: '\\(', right: '\\)', display: false}
+            ],
+            throwOnError: false
+        });
+    } else {
+        // Wait for KaTeX to load
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof renderMathInElement !== 'undefined') {
+                renderMathInElement(bioContent, {
+                    delimiters: [
+                        {left: '$$', right: '$$', display: true},
+                        {left: '$', right: '$', display: false},
+                        {left: '\\[', right: '\\]', display: true},
+                        {left: '\\(', right: '\\)', display: false}
+                    ],
+                    throwOnError: false
+                });
+            }
+        });
+    }
+</script>
+{% endif %}
+
+{% if user.show_heatmap %}
+<div style="margin: 24px 0;">
+    <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #2c3e50;">Reading Activity</h3>
+    <div id="activity-heatmap" style="display: flex; gap: 3px; flex-wrap: wrap; max-width: 800px;"></div>
+    <div style="margin-top: 8px; font-size: 12px; color: #6c757d;">
+        <span style="margin-right: 8px;">Less</span>
+        <span style="display: inline-block; width: 10px; height: 10px; background: #ebedf0; border: 1px solid #e0e0e0;"></span>
+        <span style="display: inline-block; width: 10px; height: 10px; background: #9be9a8; border: 1px solid #e0e0e0; margin-left: 3px;"></span>
+        <span style="display: inline-block; width: 10px; height: 10px; background: #40c463; border: 1px solid #e0e0e0; margin-left: 3px;"></span>
+        <span style="display: inline-block; width: 10px; height: 10px; background: #30a14e; border: 1px solid #e0e0e0; margin-left: 3px;"></span>
+        <span style="display: inline-block; width: 10px; height: 10px; background: #216e39; border: 1px solid #e0e0e0; margin-left: 3px;"></span>
+        <span style="margin-left: 8px;">More</span>
+    </div>
+</div>
+
+<script>
+    fetch('/users/{{ user.username }}/activity')
+        .then(res => res.json())
+        .then(data => {
+            const container = document.getElementById('activity-heatmap');
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            // Helper to format date in local timezone as YYYY-MM-DD
+            const formatLocalDate = (d) => {
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            };
+
+            const oneYearAgo = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate());
+            oneYearAgo.setHours(0, 0, 0, 0);
+
+            // Generate all dates for the last year
+            const dates = [];
+            const currentDate = new Date(oneYearAgo);
+            const endDate = new Date(today);
+            endDate.setDate(endDate.getDate() + 1);
+            while (currentDate < endDate) {
+                dates.push(new Date(currentDate));
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+
+            // Create squares for each day
+            dates.forEach(date => {
+                const dateStr = formatLocalDate(date);
+                const count = data[dateStr] || 0;
+
+                // Determine color based on count
+                let color;
+                if (count === 0) color = '#ebedf0';
+                else if (count === 1) color = '#9be9a8';
+                else if (count === 2) color = '#40c463';
+                else if (count === 3) color = '#30a14e';
+                else color = '#216e39';
+
+                const square = document.createElement('div');
+                square.style.width = '10px';
+                square.style.height = '10px';
+                square.style.backgroundColor = color;
+                square.style.border = '1px solid #e0e0e0';
+                square.style.borderRadius = '2px';
+                square.title = `${dateStr}: ${count} paper${count !== 1 ? 's' : ''}`;
+
+                container.appendChild(square);
+            });
+        })
+        .catch(err => console.error('Heatmap error:', err));
+</script>
+{% endif %}
+
+<div class="papers-section">
+    <h3>Papers ({{ total }})</h3>
+
+    <!-- Search Bar -->
+    <div class="search-container">
+        <input
+            type="search"
+            name="q"
+            id="search-input"
+            placeholder="Search papers..."
+            hx-get="/users/{{ user.username }}/search"
+            hx-trigger="keyup changed delay:300ms, search"
+            hx-target="#papers-list"
+            hx-indicator="#search-indicator"
+            autocomplete="off"
+        />
+        <span id="search-indicator" class="htmx-indicator">Searching...</span>
+    </div>
+
+    <div id="papers-list">
+        {% include "user_papers_list.html" %}
+    </div>
+</div>
+{% endblock %}

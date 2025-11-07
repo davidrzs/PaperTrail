@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Paper - PaperTrail{% endblock %}
+
+{% block content %}
+<div class="form-container">
+    <h2>Edit Paper</h2>
+
+    <div id="success-message" class="success-box" style="display: none;"></div>
+    <div id="error-message" class="error-box" style="display: none;"></div>
+
+    <form id="paper-form">
+        {% include "_paper_form.html" %}
+
+        <button type="submit" class="btn">Save Changes</button>
+        <a href="/papers/{{ paper.id }}" class="btn-outline">Cancel</a>
+    </form>
+</div>
+
+<script src="/static/js/tags-input.js"></script>
+<script>
+// Initialize tags input
+const tagsInput = document.getElementById('tags');
+new TagsInput(tagsInput);
+
+// Set date to today if empty
+const dateInput = document.getElementById('date_read');
+if (!dateInput.value) {
+    const today = new Date().toISOString().split('T')[0];
+    dateInput.value = today;
+}
+</script>
+
+<script>
+document.getElementById('paper-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const errorDiv = document.getElementById('error-message');
+    const successDiv = document.getElementById('success-message');
+
+    // Hide previous messages
+    errorDiv.style.display = 'none';
+    successDiv.style.display = 'none';
+
+    // Collect form data
+    const formData = {
+        title: document.getElementById('title').value,
+        authors: document.getElementById('authors').value,
+        paper_url: document.getElementById('paper_url').value || null,
+        arxiv_id: document.getElementById('arxiv_id').value || null,
+        doi: document.getElementById('doi').value || null,
+        abstract: document.getElementById('abstract').value || null,
+        summary: document.getElementById('summary').value,
+        is_private: document.getElementById('is_private').checked,
+        date_read: document.getElementById('date_read').value || null,
+        tags: document.getElementById('tags').value.split(',').map(t => t.trim()).filter(t => t)
+    };
+
+    try {
+        const response = await fetch('/papers/{{ paper.id }}', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(formData)
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            successDiv.textContent = 'Paper updated successfully!';
+            successDiv.style.display = 'block';
+            // Redirect to paper detail page after a short delay
+            setTimeout(() => window.location.href = '/papers/{{ paper.id }}', 1500);
+        } else {
+            const error = await response.json();
+            let errorMessage = 'Failed to update paper';
+            if (error.detail) {
+                if (typeof error.detail === 'string') {
+                    errorMessage = error.detail;
+                } else if (Array.isArray(error.detail)) {
+                    errorMessage = error.detail.map(e => {
+                        const field = e.loc ? e.loc[e.loc.length - 1] : 'Field';
+                        const msg = e.msg || e.message || 'Invalid value';
+                        return `${field}: ${msg}`;
+                    }).join('; ');
+                } else {
+                    errorMessage = JSON.stringify(error.detail);
+                }
+            }
+            errorDiv.textContent = errorMessage;
+            errorDiv.style.display = 'block';
+        }
+    } catch (error) {
+        errorDiv.textContent = 'Network error. Please try again.';
+        errorDiv.style.display = 'block';
+    }
+});
+</script>
+{% endblock %}

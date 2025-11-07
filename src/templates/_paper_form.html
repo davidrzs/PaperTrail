@@ -1,0 +1,51 @@
+<div class="form-field">
+    <label for="title" class="form-label">Title:</label>
+    <input type="text" id="title" name="title" required class="form-input" placeholder="Paper title" value="{{ paper.title if paper else '' }}">
+</div>
+
+<div class="form-field">
+    <label for="authors" class="form-label">Authors:</label>
+    <input type="text" id="authors" name="authors" required class="form-input" placeholder="Author names" value="{{ paper.authors if paper else '' }}">
+</div>
+
+<div class="form-field">
+    <label for="paper_url" class="form-label">Paper URL (optional):</label>
+    <input type="url" id="paper_url" name="paper_url" class="form-input" placeholder="https://arxiv.org/abs/..." value="{{ paper.paper_url if paper and paper.paper_url else '' }}">
+</div>
+
+<div class="form-field">
+    <label for="arxiv_id" class="form-label">ArXiv ID (optional):</label>
+    <input type="text" id="arxiv_id" name="arxiv_id" class="form-input" placeholder="2301.12345" value="{{ paper.arxiv_id if paper and paper.arxiv_id else '' }}">
+</div>
+
+<div class="form-field">
+    <label for="doi" class="form-label">DOI (optional):</label>
+    <input type="text" id="doi" name="doi" class="form-input" placeholder="10.1000/xyz123" value="{{ paper.doi if paper and paper.doi else '' }}">
+</div>
+
+<div class="form-field">
+    <label for="abstract" class="form-label">Abstract (optional):</label>
+    <textarea id="abstract" name="abstract" rows="6" class="form-textarea" placeholder="Paper abstract...">{{ paper.abstract if paper and paper.abstract else '' }}</textarea>
+</div>
+
+<div class="form-field">
+    <label for="summary" class="form-label">Summary/Notes:</label>
+    <textarea id="summary" name="summary" rows="4" required class="form-textarea" placeholder="Your summary or notes about this paper...">{{ paper.summary if paper else '' }}</textarea>
+</div>
+
+<div class="form-field">
+    <label for="tags" class="form-label">Tags (comma-separated):</label>
+    <input type="text" id="tags" name="tags" class="form-input" placeholder="machine-learning, nlp, transformers" value="{% if paper and paper.tags %}{% for tag in paper.tags %}{{ tag.name }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}">
+</div>
+
+<div class="form-field">
+    <label for="date_read" class="form-label">Date Read:</label>
+    <input type="date" id="date_read" name="date_read" class="form-input" value="{{ paper.date_read.strftime('%Y-%m-%d') if paper and paper.date_read else '' }}">
+</div>
+
+<div class="form-field">
+    <label class="checkbox-label">
+        <input type="checkbox" id="is_private" name="is_private" {% if paper and paper.is_private %}checked{% endif %}>
+        <span class="form-label">Make this paper private</span>
+    </label>
+</div>

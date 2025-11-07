@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}PaperTrail{% endblock %}
+
+{% block content %}
+<p class="subtext">PaperTrail - A research log for tracking papers you've read. Stay organized, track your journey.</p>
+
+<!-- Statistics -->
+<!--
+<div class="stats-container">
+    <span class="stat-item"><strong>{{ total_papers }}</strong> papers</span>
+    <span class="stat-item"><strong>{{ total_users }}</strong> users</span>
+</div>
+-->
+
+<!-- Recently Read Papers -->
+<div class="papers-list">
+    <h2>Recently Read Papers</h2>
+
+    <!-- Search Bar -->
+    <div class="search-container">
+        <input
+            type="search"
+            name="q"
+            id="search-input"
+            placeholder="Search papers..."
+            hx-get="/papers/search"
+            hx-trigger="keyup changed delay:300ms, search"
+            hx-target="#papers-list"
+            hx-indicator="#search-indicator"
+            autocomplete="off"
+        />
+        <span id="search-indicator" class="htmx-indicator">Searching...</span>
+    </div>
+
+    <div id="papers-list">
+        {% set papers = recent_papers %}
+        {% set show_actions = False %}
+        {% include "_paper_list.html" %}
+    </div>
+</div>
+{% endblock %}
