@@ -201,7 +201,14 @@ def auth_headers(test_user: dict) -> dict:
 
 @pytest.fixture
 def second_user(client: TestClient) -> dict:
-    """Create a second test user with login helper"""
+    """Create a second test user with login helper
+
+    In single-user mode, this will skip tests that require a second user.
+    """
+    # Skip creating second user in single-user mode
+    if settings.single_user:
+        pytest.skip("Second user creation not allowed in single-user mode")
+
     user_data = {
         "username": "seconduser",
         "email": "second@example.com",
