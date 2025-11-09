@@ -79,9 +79,9 @@ async def home(
     """Home page with recent papers and statistics"""
     from src.models import Paper
 
-    # In single-user mode, redirect to papers list if logged in
+    # In single-user mode, redirect to user's feed page if logged in
     if settings.single_user and current_user:
-        return RedirectResponse(url="/papers", status_code=302)
+        return RedirectResponse(url=f"/users/{current_user.username}/feed", status_code=302)
 
     # Get recent papers (public + user's private if logged in)
     query = db.query(Paper)

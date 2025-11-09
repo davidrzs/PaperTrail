@@ -75,24 +75,26 @@ def get_user_papers_api(
     }
 
 
-@router.get("/{username}", response_model=UserPublic)
-def get_user_profile_api(
+@router.get("/{username}", response_class=HTMLResponse)
+async def get_user_profile_page(
+    request: Request,
     username: str,
+    current_user: User = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
     """
-    Get user profile by username (API endpoint).
+    User profile page (HTML) - redirects to feed page.
 
     Args:
         username: Username
+        current_user: Optional authenticated user
         db: Database session
 
     Returns:
-        User profile
-
-    Raises:
-        HTTPException: If user not found
+        Redirect to user feed page
     """
+    from fastapi.responses import RedirectResponse
+
     user = db.query(User).filter(User.username == username).first()
 
     if not user:
@@ -101,7 +103,8 @@ def get_user_profile_api(
             detail="User not found"
         )
 
-    return user
+    # Redirect to feed page
+    return RedirectResponse(url=f"/users/{username}/feed", status_code=302)
 
 
 @router.get("/{username}/feed", response_class=HTMLResponse)
