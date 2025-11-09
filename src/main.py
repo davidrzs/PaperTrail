@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from src.config import settings
-from src.database import init_db, get_db
+from src.database import get_db
 from src.embeddings import load_model
 from src.routers import auth, papers, tags, users
 from src.auth import get_current_user, get_current_user_optional
@@ -46,11 +46,9 @@ app.include_router(users.router)
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database and load embedding model on startup"""
-    try:
-        init_db()
-    except Exception as e:
-        print(f"Database already initialized or error: {e}")
+    """Load embedding model on startup"""
+    # Note: Database migrations should be run separately via `make migrate`
+    # or automatically via docker-compose
 
     # Load embedding model
     try:

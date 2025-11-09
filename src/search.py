@@ -1,8 +1,8 @@
-"""Hybrid search implementation using FTS5 + vector similarity with RRF"""
+"""Hybrid search implementation using PostgreSQL FTS + pgvector with RRF"""
 
 import numpy as np
 from typing import List, Tuple, Optional
-from sqlalchemy import text
+from sqlalchemy import text, func
 from sqlalchemy.orm import Session
 
 from src.embeddings import generate_embedding
@@ -11,7 +11,7 @@ from src.models import Paper
 
 def fts_search(db: Session, query: str, limit: int = 50, user_id: Optional[int] = None) -> List[int]:
     """
-    Perform full-text search using SQLite FTS5.
+    Perform full-text search using PostgreSQL tsvector.
 
     Args:
         db: Database session
@@ -20,17 +20,18 @@ def fts_search(db: Session, query: str, limit: int = 50, user_id: Optional[int] 
         user_id: Optional user ID to include their private papers
 
     Returns:
-        List of paper IDs ordered by relevance
+        List of paper IDs ordered by relevance (ts_rank)
     """
-    # Use FTS5 MATCH for full-text search, then filter by privacy
+    # Convert query to tsquery format (handle spaces and special characters)
+    # Using plainto_tsquery for simple queries
     if user_id is not None:
         result = db.execute(
             text("""
-                SELECT papers_fts.rowid FROM papers_fts
-                JOIN papers ON papers.id = papers_fts.rowid
-                WHERE papers_fts MATCH :query
-                  AND (papers.is_private = 0 OR papers.user_id = :user_id)
-                ORDER BY rank
+                SELECT id
+                FROM papers
+                WHERE search_vector @@ plainto_tsquery('english', :query)
+                  AND (is_private = false OR user_id = :user_id)
+                ORDER BY ts_rank(search_vector, plainto_tsquery('english', :query)) DESC
                 LIMIT :limit
             """),
             {"query": query, "limit": limit, "user_id": user_id}
@@ -38,11 +39,11 @@ def fts_search(db: Session, query: str, limit: int = 50, user_id: Optional[int] 
     else:
         result = db.execute(
             text("""
-                SELECT papers_fts.rowid FROM papers_fts
-                JOIN papers ON papers.id = papers_fts.rowid
-                WHERE papers_fts MATCH :query
-                  AND papers.is_private = 0
-                ORDER BY rank
+                SELECT id
+                FROM papers
+                WHERE search_vector @@ plainto_tsquery('english', :query)
+                  AND is_private = false
+                ORDER BY ts_rank(search_vector, plainto_tsquery('english', :query)) DESC
                 LIMIT :limit
             """),
             {"query": query, "limit": limit}
@@ -58,10 +59,9 @@ def vector_search(
     user_id: Optional[int] = None
 ) -> List[Tuple[int, float]]:
     """
-    Perform vector similarity search.
+    Perform vector similarity search using pgvector.
 
-    For now, this does a brute-force cosine similarity search.
-    TODO: Use sqlite-vec for optimized vector search once we set it up.
+    Uses cosine distance operator (<=> ) for efficient similarity search.
 
     Args:
         db: Database session
@@ -72,45 +72,36 @@ def vector_search(
     Returns:
         List of (paper_id, distance) tuples ordered by similarity
     """
-    from src.models import Embedding
+    # Convert numpy array to list for PostgreSQL
+    query_vector = query_embedding.tolist()
 
-    # Get all embeddings from database
-    embeddings_query = db.query(Embedding.paper_id, Embedding.embedding_vector)
-
-    # Filter by visibility if user_id provided
+    # Use pgvector's cosine distance operator (<=>)
     if user_id is not None:
-        embeddings_query = embeddings_query.join(Paper).filter(
-            (Paper.is_private == False) | (Paper.user_id == user_id)
+        result = db.execute(
+            text("""
+                SELECT e.paper_id, e.embedding_vector <=> :query_vector AS distance
+                FROM embeddings e
+                JOIN papers p ON e.paper_id = p.id
+                WHERE p.is_private = false OR p.user_id = :user_id
+                ORDER BY distance
+                LIMIT :limit
+            """),
+            {"query_vector": str(query_vector), "limit": limit, "user_id": user_id}
         )
     else:
-        embeddings_query = embeddings_query.join(Paper).filter(Paper.is_private == False)
-
-    embeddings = embeddings_query.all()
-
-    if not embeddings:
-        return []
-
-    # Calculate cosine similarity for each embedding
-    results = []
-    query_norm = np.linalg.norm(query_embedding)
-
-    for paper_id, embedding_blob in embeddings:
-        # Convert blob back to numpy array
-        paper_embedding = np.frombuffer(embedding_blob, dtype=np.float32)
-
-        # Cosine similarity
-        similarity = np.dot(query_embedding, paper_embedding) / (
-            query_norm * np.linalg.norm(paper_embedding)
+        result = db.execute(
+            text("""
+                SELECT e.paper_id, e.embedding_vector <=> :query_vector AS distance
+                FROM embeddings e
+                JOIN papers p ON e.paper_id = p.id
+                WHERE p.is_private = false
+                ORDER BY distance
+                LIMIT :limit
+            """),
+            {"query_vector": str(query_vector), "limit": limit}
         )
 
-        # Convert to distance (1 - similarity)
-        distance = 1 - similarity
-        results.append((paper_id, float(distance)))
-
-    # Sort by distance (ascending = most similar first)
-    results.sort(key=lambda x: x[1])
-
-    return results[:limit]
+    return [(row[0], float(row[1])) for row in result.fetchall()]
 
 
 def reciprocal_rank_fusion(

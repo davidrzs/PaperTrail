@@ -3,8 +3,9 @@
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, Table, Date
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, Table, Date, Index
 from sqlalchemy.orm import relationship, Mapped, mapped_column
+from pgvector.sqlalchemy import Vector
 
 from src.database import Base
 
@@ -60,6 +61,12 @@ class Paper(Base):
     user: Mapped["User"] = relationship("User", back_populates="papers")
     tags: Mapped[List["Tag"]] = relationship("Tag", secondary=paper_tags, back_populates="papers")
 
+    __table_args__ = (
+        # GIN index for full-text search using PostgreSQL tsvector
+        # This will be created via trigger in the migration
+        {},
+    )
+
 
 class Tag(Base):
     """Tag model (per-user tags)"""
@@ -81,10 +88,17 @@ class Tag(Base):
 
 
 class Embedding(Base):
-    """Embedding model for vector search"""
+    """Embedding model for vector search using pgvector"""
 
     __tablename__ = "embeddings"
 
     paper_id: Mapped[int] = mapped_column(Integer, ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True)
-    embedding_vector: Mapped[bytes] = mapped_column(Text, nullable=False)  # Stored as blob
+    # Using pgvector - dimension will be set in migration based on model dimension
+    embedding_vector = mapped_column(Vector(None), nullable=False)
     embedding_source: Mapped[str] = mapped_column(String(50), default="abstract_summary", nullable=False)
+
+    __table_args__ = (
+        # Create index for vector similarity search (using cosine distance)
+        Index('embedding_vector_idx', 'embedding_vector', postgresql_using='ivfflat',
+              postgresql_with={'lists': 100}, postgresql_ops={'embedding_vector': 'vector_cosine_ops'}),
+    )

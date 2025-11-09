@@ -1,76 +1,44 @@
 """Pytest configuration and fixtures"""
 
 import os
-import tempfile
 from typing import Generator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
+from alembic.config import Config
+from alembic import command
 
 from src.database import Base, get_db
 from src.main import app
 
 
-# Use an in-memory SQLite database for testing
+# PostgreSQL test database URL
+# Override with TEST_DATABASE_URL environment variable if needed
+TEST_DATABASE_URL = os.getenv(
+    "TEST_DATABASE_URL",
+    "postgresql://postgres:postgres@localhost:5432/papertrail_test"
+)
+
+
 @pytest.fixture(scope="function")
 def test_db() -> Generator[Session, None, None]:
-    """Create a fresh database for each test"""
-    from sqlalchemy import text
-
-    # Create temporary database file
-    db_fd, db_path = tempfile.mkstemp()
+    """Create a fresh database for each test using PostgreSQL"""
 
     # Create engine with test database
-    engine = create_engine(
-        f"sqlite:///{db_path}",
-        connect_args={"check_same_thread": False}
-    )
+    engine = create_engine(TEST_DATABASE_URL, echo=False)
 
-    # Create all tables
-    Base.metadata.create_all(bind=engine)
+    # Drop all tables before creating new ones
+    Base.metadata.drop_all(bind=engine)
 
-    # Create FTS5 virtual table and triggers for testing
-    with engine.connect() as conn:
-        # Create FTS5 virtual table
-        conn.execute(text("""
-            CREATE VIRTUAL TABLE papers_fts USING fts5(
-                title,
-                authors,
-                abstract,
-                summary,
-                content=papers,
-                content_rowid=id
-            )
-        """))
+    # Run Alembic migrations to create schema
+    alembic_cfg = Config("alembic.ini")
+    # Override the database URL for test database
+    alembic_cfg.set_main_option("sqlalchemy.url", TEST_DATABASE_URL)
 
-        # Create triggers to keep FTS in sync
-        conn.execute(text("""
-            CREATE TRIGGER papers_fts_insert AFTER INSERT ON papers BEGIN
-                INSERT INTO papers_fts(rowid, title, authors, abstract, summary)
-                VALUES (new.id, new.title, new.authors, COALESCE(new.abstract, ''), new.summary);
-            END
-        """))
-
-        conn.execute(text("""
-            CREATE TRIGGER papers_fts_update AFTER UPDATE ON papers BEGIN
-                UPDATE papers_fts
-                SET title=new.title,
-                    authors=new.authors,
-                    abstract=COALESCE(new.abstract, ''),
-                    summary=new.summary
-                WHERE rowid=old.id;
-            END
-        """))
-
-        conn.execute(text("""
-            CREATE TRIGGER papers_fts_delete AFTER DELETE ON papers BEGIN
-                DELETE FROM papers_fts WHERE rowid=old.id;
-            END
-        """))
-
-        conn.commit()
+    # Run migrations
+    command.upgrade(alembic_cfg, "head")
 
     # Create session
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -80,9 +48,9 @@ def test_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+        # Clean up: drop all tables after test
         Base.metadata.drop_all(bind=engine)
-        os.close(db_fd)
-        os.unlink(db_path)
+        engine.dispose()
 
 
 @pytest.fixture(scope="function")
