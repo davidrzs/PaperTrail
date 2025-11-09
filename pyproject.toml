@@ -2,7 +2,7 @@
 name = "papertrail"
 version = "0.1.0"
 description = "Personal Paper Reading Tracker with hybrid search"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.12"
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
@@ -19,12 +19,13 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "aiosqlite>=0.19.0",
     "numpy>=1.24.0",
+    "torch>=2.0.0",
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.1.0",
 ]
 
-# CPU-only PyTorch from PyTorch index (no CUDA dependencies)
+# Use PyTorch CPU-only index (no CUDA dependencies)
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
@@ -32,4 +33,3 @@ explicit = true
 
 [tool.uv.sources]
 torch = { index = "pytorch-cpu" }
-torchvision = { index = "pytorch-cpu" }
