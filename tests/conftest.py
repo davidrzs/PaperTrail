@@ -1,44 +1,96 @@
 """Pytest configuration and fixtures"""
 
 import os
+import sqlite3
+from pathlib import Path
 from typing import Generator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
-from alembic.config import Config
-from alembic import command
 
 from src.database import Base, get_db
 from src.main import app
 
 
-# PostgreSQL test database URL
-# Override with TEST_DATABASE_URL environment variable if needed
+# SQLite test database URL
+# Override with DATABASE_URL environment variable if needed
 TEST_DATABASE_URL = os.getenv(
-    "TEST_DATABASE_URL",
-    "postgresql://postgres:postgres@localhost:5432/papertrail_test"
+    "DATABASE_URL",
+    "sqlite:///./data/papertrail_test.db"
 )
 
 
 @pytest.fixture(scope="function")
 def test_db() -> Generator[Session, None, None]:
-    """Create a fresh database for each test using PostgreSQL"""
+    """Create a fresh database for each test using SQLite"""
+
+    # Ensure data directory exists
+    data_dir = Path("./data")
+    data_dir.mkdir(exist_ok=True)
 
     # Create engine with test database
-    engine = create_engine(TEST_DATABASE_URL, echo=False)
+    engine = create_engine(
+        TEST_DATABASE_URL,
+        connect_args={"check_same_thread": False},
+        echo=False
+    )
+
+    # Enable foreign keys for SQLite
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_conn, connection_record):
+        if isinstance(dbapi_conn, sqlite3.Connection):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
 
     # Drop all tables before creating new ones
     Base.metadata.drop_all(bind=engine)
 
-    # Run Alembic migrations to create schema
-    alembic_cfg = Config("alembic.ini")
-    # Override the database URL for test database
-    alembic_cfg.set_main_option("sqlalchemy.url", TEST_DATABASE_URL)
+    # Create all tables
+    Base.metadata.create_all(bind=engine)
 
-    # Run migrations
-    command.upgrade(alembic_cfg, "head")
+    # Create FTS5 virtual table and triggers
+    with engine.connect() as conn:
+        # Create FTS5 virtual table
+        conn.execute(text("""
+            CREATE VIRTUAL TABLE papers_fts USING fts5(
+                title,
+                authors,
+                abstract,
+                summary,
+                content=papers,
+                content_rowid=id
+            )
+        """))
+
+        # Create triggers to keep FTS in sync
+        conn.execute(text("""
+            CREATE TRIGGER papers_fts_insert AFTER INSERT ON papers BEGIN
+                INSERT INTO papers_fts(rowid, title, authors, abstract, summary)
+                VALUES (new.id, new.title, new.authors, COALESCE(new.abstract, ''), new.summary);
+            END
+        """))
+
+        conn.execute(text("""
+            CREATE TRIGGER papers_fts_update AFTER UPDATE ON papers BEGIN
+                UPDATE papers_fts
+                SET title=new.title,
+                    authors=new.authors,
+                    abstract=COALESCE(new.abstract, ''),
+                    summary=new.summary
+                WHERE rowid=old.id;
+            END
+        """))
+
+        conn.execute(text("""
+            CREATE TRIGGER papers_fts_delete AFTER DELETE ON papers BEGIN
+                DELETE FROM papers_fts WHERE rowid=old.id;
+            END
+        """))
+
+        conn.commit()
 
     # Create session
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

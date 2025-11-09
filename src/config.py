@@ -6,8 +6,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
 
-    # Essential environment-specific settings
-    database_url: str = "postgresql://papertrail:papertrail_dev_password@localhost:5432/papertrail"
+    # Database
+    database_url: str = "sqlite:///./data/papertrail.db"
+
+    # Security
     secret_key: str = "your-secret-key-here-change-in-production"
     debug: bool = False
 

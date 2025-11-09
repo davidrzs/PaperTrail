@@ -1,4 +1,4 @@
-.PHONY: help test dev migrate migrate-create migrate-down migrate-history seed build docker-run docker-stop docker-clean
+.PHONY: help test dev build docker-run docker-stop docker-clean
 
 CONTAINER_NAME=papertrail
 IMAGE_NAME=papertrail
@@ -8,19 +8,12 @@ help:
 	@echo "PaperTrail - Available commands:"
 	@echo ""
 	@echo "Development:"
-	@echo "  make dev              - Run locally with uv (auto-runs migrations)"
+	@echo "  make dev              - Run locally with uv (auto-initializes database)"
 	@echo "  make test             - Run all tests with pytest"
-	@echo "  make seed             - Load sample data fixtures (demo user + 8 papers)"
-	@echo ""
-	@echo "Database migrations:"
-	@echo "  make migrate          - Run pending database migrations"
-	@echo "  make migrate-create   - Create a new migration file (requires MESSAGE='...')"
-	@echo "  make migrate-down     - Rollback one migration"
-	@echo "  make migrate-history  - Show migration history"
 	@echo ""
 	@echo "Docker deployment:"
 	@echo "  make build            - Build Docker image"
-	@echo "  make docker-run       - Run Docker container (requires DATABASE_URL env var)"
+	@echo "  make docker-run       - Run Docker container with volume for database"
 	@echo "  make docker-stop      - Stop Docker container"
 	@echo "  make docker-clean     - Remove Docker image and containers"
 
@@ -34,15 +27,11 @@ build:
 
 docker-run:
 	@echo "Starting PaperTrail with Docker..."
-	@if [ -z "$$DATABASE_URL" ]; then \
-		echo "Error: DATABASE_URL environment variable is required"; \
-		echo "Example: DATABASE_URL=postgresql://user:pass@host:5432/dbname make docker-run"; \
-		exit 1; \
-	fi
 	@echo "Server will be available at http://localhost:$(PORT)"
 	@docker run --rm -it \
 		--name $(CONTAINER_NAME) \
 		-p $(PORT):8000 \
+		-v papertrail_data:/app/data \
 		--env-file .env \
 		$(IMAGE_NAME)
 
@@ -57,40 +46,7 @@ docker-clean: docker-stop
 
 dev:
 	@echo "Running PaperTrail locally with uv..."
-	@echo "Running migrations..."
-	@uv run alembic upgrade head
+	@echo "Initializing database..."
+	@uv run python -c "from src.database import init_db; init_db()"
 	@echo "Starting server..."
 	uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
-
-migrate:
-	@echo "Running database migrations..."
-	uv run alembic upgrade head
-	@echo "Migrations complete!"
-
-migrate-create:
-	@if [ -z "$(MESSAGE)" ]; then \
-		echo "Error: MESSAGE is required. Usage: make migrate-create MESSAGE='description'"; \
-		exit 1; \
-	fi
-	@echo "Creating new migration: $(MESSAGE)"
-	@uv run alembic revision -m "$(MESSAGE)"
-	@echo "Migration file created in alembic/versions/"
-	@echo "Edit the file to add upgrade() and downgrade() logic"
-
-migrate-down:
-	@echo "Rolling back one migration..."
-	uv run alembic downgrade -1
-	@echo "Rollback complete!"
-
-migrate-history:
-	@echo "Migration history:"
-	@uv run alembic history --verbose
-
-# Load seed data
-seed:
-	@echo "Loading seed data fixtures..."
-	@echo "This will create a demo user and 8 sample papers with embeddings."
-	@echo ""
-	uv run python -m src.fixtures
-	@echo ""
-	@echo "Seed data loaded! Start the app with 'make dev' or 'make up'"

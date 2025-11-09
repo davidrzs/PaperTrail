@@ -21,17 +21,19 @@ COPY uv.lock .
 # Install Python dependencies using uv
 RUN uv sync --frozen --no-dev
 
-# Copy application code and migrations
+# Copy application code
 COPY src/ ./src/
-COPY alembic/ ./alembic/
-COPY alembic.ini .
+
+# Create volume mount point for database
+VOLUME ["/app/data"]
 
 # Expose port
 EXPOSE 8000
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
+ENV DATABASE_URL=sqlite:///./data/papertrail.db
 
-# Run database migrations on startup, then start server
-CMD uv run alembic upgrade head && \
+# Run database initialization on startup, then start server
+CMD uv run python -c "from src.database import init_db; init_db()" && \
     uv run uvicorn src.main:app --host 0.0.0.0 --port 8000
