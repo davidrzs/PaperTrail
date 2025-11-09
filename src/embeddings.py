@@ -13,9 +13,6 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 # Global model instance (loaded once on startup)
 _model: Optional[SentenceTransformer] = None
 
-# EmbeddingGemma supports 2048 tokens max
-MAX_TEXT_LENGTH = 8000  # Conservative char limit (~2048 tokens)
-
 
 def load_model() -> SentenceTransformer:
     """
@@ -44,25 +41,11 @@ def get_model() -> SentenceTransformer:
     return _model
 
 
-def truncate_text(text: str, max_length: int = MAX_TEXT_LENGTH) -> str:
-    """
-    Truncate text to max_length characters if needed.
-
-    Args:
-        text: Input text
-        max_length: Maximum character length
-
-    Returns:
-        Truncated text
-    """
-    if len(text) <= max_length:
-        return text
-    return text[:max_length]
-
-
 def generate_embedding(text: str) -> np.ndarray:
     """
     Generate embedding for a query text using EmbeddingGemma.
+
+    Model automatically truncates to 2048 tokens if input is too long.
 
     Args:
         text: Input query text to embed
@@ -72,10 +55,8 @@ def generate_embedding(text: str) -> np.ndarray:
     """
     model = get_model()
 
-    # Truncate if too long
-    text = truncate_text(text)
-
     # Use encode_query for query text (applies task-specific prompt)
+    # Model handles truncation at token level automatically
     embedding = model.encode_query(text)
 
     return embedding
@@ -84,6 +65,8 @@ def generate_embedding(text: str) -> np.ndarray:
 def generate_paper_embedding(abstract: Optional[str], summary: str) -> np.ndarray:
     """
     Generate embedding for a paper by combining abstract and summary.
+
+    Model automatically truncates to 2048 tokens if input is too long.
 
     Args:
         abstract: Optional paper abstract
@@ -102,10 +85,8 @@ def generate_paper_embedding(abstract: Optional[str], summary: str) -> np.ndarra
 
     text = "\n\n".join(parts)
 
-    # Truncate if too long
-    text = truncate_text(text)
-
     # Use encode_document for paper text (applies document-specific prompt)
+    # Model handles truncation at token level automatically
     embedding = model.encode_document(text)
 
     return embedding

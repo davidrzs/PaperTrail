@@ -16,9 +16,9 @@ class TestEmbeddings:
         """Test that the embedding model loads successfully"""
         model = load_model()
         assert model is not None
-        # Verify model produces expected dimension (1024 for Qwen3-Embedding-0.6B)
+        # Verify model produces expected dimension (768 for EmbeddingGemma-300m)
         test_embedding = model.encode("test")
-        assert test_embedding.shape[0] == 1024
+        assert test_embedding.shape[0] == 768
 
     def test_generate_embedding(self):
         """Test generating embeddings for text"""
@@ -26,7 +26,7 @@ class TestEmbeddings:
         embedding = generate_embedding(text)
 
         assert isinstance(embedding, np.ndarray)
-        assert embedding.shape[0] == 1024
+        assert embedding.shape[0] == 768
         assert embedding.dtype == np.float32
 
     def test_generate_paper_embedding_with_abstract(self):
@@ -37,7 +37,7 @@ class TestEmbeddings:
         embedding = generate_paper_embedding(abstract, summary)
 
         assert isinstance(embedding, np.ndarray)
-        assert embedding.shape[0] == 1024
+        assert embedding.shape[0] == 768
 
     def test_generate_paper_embedding_without_abstract(self):
         """Test generating paper embeddings with only summary (no abstract)"""
@@ -46,7 +46,7 @@ class TestEmbeddings:
         embedding = generate_paper_embedding(None, summary)
 
         assert isinstance(embedding, np.ndarray)
-        assert embedding.shape[0] == 1024
+        assert embedding.shape[0] == 768
 
     def test_embedding_similarity(self):
         """Test that similar texts produce similar embeddings"""
@@ -93,7 +93,7 @@ class TestPaperCreationWithEmbeddings:
 
         # Verify embedding can be decoded
         embedding_array = np.frombuffer(embedding.embedding_vector, dtype=np.float32)
-        assert embedding_array.shape[0] == 1024
+        assert embedding_array.shape[0] == 768
 
     def test_create_paper_without_abstract_generates_embedding(self, client: TestClient, auth_headers, db_session):
         """Test that papers without abstracts still generate embeddings"""

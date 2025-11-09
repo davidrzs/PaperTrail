@@ -34,6 +34,8 @@ def test_register_user(client: TestClient):
 
 def test_register_duplicate_username(client: TestClient, test_user: dict):
     """Test registration with duplicate username"""
+    from src.config import settings
+
     user_data = {
         "username": test_user["username"],  # Same username
         "email": "different@example.com",
@@ -41,12 +43,19 @@ def test_register_duplicate_username(client: TestClient, test_user: dict):
     }
 
     response = client.post("/auth/register", json=user_data)
-    assert response.status_code == 400
-    assert "username" in response.json()["detail"].lower()
+
+    # In single-user mode, second registration is blocked with 403
+    if settings.single_user:
+        assert response.status_code == 403
+    else:
+        assert response.status_code == 400
+        assert "username" in response.json()["detail"].lower()
 
 
 def test_register_duplicate_email(client: TestClient, test_user: dict):
     """Test registration with duplicate email"""
+    from src.config import settings
+
     user_data = {
         "username": "differentuser",
         "email": test_user["email"],  # Same email
@@ -54,8 +63,13 @@ def test_register_duplicate_email(client: TestClient, test_user: dict):
     }
 
     response = client.post("/auth/register", json=user_data)
-    assert response.status_code == 400
-    assert "email" in response.json()["detail"].lower()
+
+    # In single-user mode, second registration is blocked with 403
+    if settings.single_user:
+        assert response.status_code == 403
+    else:
+        assert response.status_code == 400
+        assert "email" in response.json()["detail"].lower()
 
 
 def test_login_success(client: TestClient, test_user: dict):

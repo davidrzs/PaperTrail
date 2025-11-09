@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from src.config import settings
 from src.database import Base, get_db
 from src.main import app
 
@@ -44,6 +45,11 @@ def test_db() -> Generator[Session, None, None]:
             cursor = dbapi_conn.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
+
+    # Drop FTS5 table first (if exists) since it's not in SQLAlchemy metadata
+    with engine.connect() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS papers_fts"))
+        conn.commit()
 
     # Drop all tables before creating new ones
     Base.metadata.drop_all(bind=engine)
@@ -100,7 +106,10 @@ def test_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
-        # Clean up: drop all tables after test
+        # Clean up: drop FTS5 table first, then all other tables
+        with engine.connect() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS papers_fts"))
+            conn.commit()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
 
@@ -157,6 +166,12 @@ def test_user(client: TestClient) -> dict:
 def test_user_obj(client: TestClient, test_db: Session):
     """Create a test user and return User object (for search tests)"""
     from src.models import User
+
+    # In single-user mode, check if a user already exists
+    if settings.single_user:
+        existing_user = test_db.query(User).first()
+        if existing_user:
+            return existing_user
 
     user_data = {
         "username": "testuserobj",
@@ -238,8 +253,15 @@ def db_session(test_db: Session) -> Session:
 
 @pytest.fixture
 def test_user2(client: TestClient, test_db: Session):
-    """Create a second test user and return User object"""
+    """Create a second test user and return User object
+
+    In single-user mode, this will skip tests that require a second user.
+    """
     from src.models import User
+
+    # Skip creating second user in single-user mode
+    if settings.single_user:
+        pytest.skip("Second user creation not allowed in single-user mode")
 
     user_data = {
         "username": "testuser2",
