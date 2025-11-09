@@ -4,49 +4,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-PaperTrail is a personal paper reading tracker with hybrid search (PostgreSQL FTS + pgvector). FastAPI backend serving both API endpoints and HTML templates with Jinja2. Uses PostgreSQL 18 with tsvector for full-text search, pgvector for semantic vector search using Qwen3-Embedding-0.6B (896 dimensions), combined via Reciprocal Rank Fusion (RRF). Database migrations managed with Alembic.
+PaperTrail is a personal paper reading tracker with hybrid search (SQLite FTS5 + vector embeddings). FastAPI backend serving both API endpoints and HTML templates with Jinja2. Uses SQLite with FTS5 for full-text search and brute-force cosine similarity for semantic vector search using google/embeddinggemma-300m, combined via Reciprocal Rank Fusion (RRF). Database initialization via `init_db()` function with automatic FTS5 trigger setup.
 
 ## Quick Start
 
-Requires PostgreSQL 18+ with pgvector extension. Use a managed service (AWS RDS, DigitalOcean, Supabase, Neon) or install locally.
-
 ```bash
-# 1. Copy environment file and configure DATABASE_URL
-cp .env.example .env
-# Edit .env and set DATABASE_URL to your PostgreSQL connection string
+# 1. Install dependencies
+uv sync
 
-# 2. Run migrations
-make migrate
-
-# 3. Load sample data (optional but recommended)
-make seed
-
-# 4. Start the app
+# 2. Start the app (auto-initializes database)
 make dev
 
 # Visit http://localhost:8000
-# Log in with demo/demo123
+# First user to register becomes the single user (if SINGLE_USER=true)
 ```
 
 ## Development Commands
 
 ### Local Development
 ```bash
-# Run locally with hot reload (requires PostgreSQL with pgvector)
+# Run locally with hot reload (auto-initializes SQLite database)
 make dev
-
-# Load sample data (demo user + 8 famous ML papers)
-make seed
 
 # Run tests
 make test
 uv run pytest tests/ -v
 
 # Run single test file
-uv run pytest tests/test_search.py -v
+uv run pytest tests/test_auth.py -v
 
 # Run specific test
-uv run pytest tests/test_search.py::test_hybrid_search -v
+uv run pytest tests/test_auth.py::test_register_user -v
 ```
 
 ### Docker Deployment
@@ -54,7 +42,7 @@ uv run pytest tests/test_search.py::test_hybrid_search -v
 # Build Docker image
 make build
 
-# Run container (requires .env file with DATABASE_URL)
+# Run container with persistent volume
 make docker-run
 
 # Stop container
@@ -64,83 +52,37 @@ make docker-stop
 make docker-clean
 ```
 
-### Database Migrations (Alembic)
-```bash
-# Run all pending migrations
-make migrate
-
-# Create a new migration file (hand-written)
-make migrate-create MESSAGE="add new field to users"
-
-# Rollback one migration
-make migrate-down
-
-# Show migration history
-make migrate-history
-
-# Direct Alembic commands
-uv run alembic upgrade head        # Apply all migrations
-uv run alembic downgrade -1        # Rollback one migration
-uv run alembic current             # Show current revision
-uv run alembic history --verbose   # Show detailed history
-```
-
-### Loading Seed Data (Fixtures)
-```bash
-# Load sample data for development
-make seed
-
-# Creates:
-#   - Demo user (username: demo, password: demo123)
-#   - 8 famous ML/AI papers (Attention Is All You Need, BERT, GPT-3, etc.)
-#   - Tags for each paper
-#   - Embeddings for semantic search
-
-# Custom fixtures file
-uv run python -m src.fixtures path/to/custom_fixtures.json
-
-# Safe to run multiple times - skips existing users/papers
-```
-
-Fixtures are defined in `fixtures/seed_data.json`. The loader (`src/fixtures.py`):
-- Creates users with hashed passwords
-- Creates papers with associated tags
-- Generates embeddings for each paper
-- Skips duplicates on re-run
-
 ## Architecture Overview
 
 ### Database Layer (`src/database.py`)
-- SQLAlchemy engine with PostgreSQL 18
-- Alembic for schema migrations (`alembic/versions/`)
+- SQLite with file-based storage (`data/papertrail.db`)
+- `init_db()` function creates tables and FTS5 virtual table with triggers
+- FTS5 virtual table (`papers_fts`) synced via triggers (insert, update, delete)
 - `get_db()` dependency provides sessions to FastAPI endpoints
-- Connection pooling with `pool_pre_ping=True` for reliability
+- Foreign keys enabled via pragma on connection
 
-### Migration System (`alembic/`)
-- Hand-written migrations (not auto-generated) for full control
-- Initial migration (`001_initial_schema.py`) creates:
-  - All tables with proper indexes
-  - pgvector extension
-  - Generated column `search_vector` (tsvector) with weighted FTS
-  - GIN index for full-text search
-  - IVFFlat index for vector similarity (cosine distance)
-- Migrations run automatically via `make dev` or at Docker startup
-- New migrations created with `make migrate-create MESSAGE="..."`
+### Database Initialization
+No migrations - database initialized via `init_db()` which:
+1. Creates all SQLAlchemy tables via `Base.metadata.create_all()`
+2. Creates FTS5 virtual table: `CREATE VIRTUAL TABLE papers_fts USING fts5(...)`
+3. Sets up triggers to keep FTS5 in sync with papers table
+4. Runs automatically on startup (Dockerfile CMD) and via `make dev`
 
 ### Search Architecture (`src/search.py`)
 Three-stage hybrid search:
-1. PostgreSQL FTS using `search_vector` column (generated tsvector with weighted fields: title=A, authors=B, abstract=C, summary=D)
-2. pgvector cosine similarity search using `<=>` operator with IVFFlat index
-3. Reciprocal Rank Fusion (RRF) combines both results with formula: score = sum(1/(k+rank))
+1. **SQLite FTS5**: `papers_fts` virtual table with weighted fields (title, authors, abstract, summary)
+2. **Vector Search**: Brute-force cosine similarity using numpy on embeddings stored as blobs
+3. **Reciprocal Rank Fusion (RRF)**: Combines both results with formula: score = sum(1/(k+rank))
 
 Privacy filtering happens at SQL level in both FTS and vector search. RRF constant `k=60` hardcoded in config.
 
 ### Embedding System (`src/embeddings.py`)
-- Global `_model` loaded once on startup (heavy operation, ~600MB)
-- Qwen3-Embedding-0.6B produces 896-dimensional vectors
+- Global `_model` loaded once on startup (heavy operation)
+- google/embeddinggemma-300m produces embeddings
 - Papers embed: abstract + summary concatenated
 - Query embeds: use `prompt_name="query"` for better retrieval
-- Embeddings stored as pgvector type, queried with native operators
+- Embeddings stored as bytes blob (numpy array via `tobytes()`)
+- Retrieved via `np.frombuffer()` for similarity computation
 
 ### Router Structure (`src/routers/`)
 - `auth.py` - HTTP-only session cookies (JWT stored in cookie)
@@ -150,6 +92,8 @@ Privacy filtering happens at SQL level in both FTS and vector search. RRF consta
 
 ### Template System
 - Base: `src/templates/base.html` with `.content` wrapper (max-width: 1200px, padding: 32px 24px)
+- JavaScript-based navigation updates based on auth state
+- Global template variable `single_user` controls UI visibility
 - Partials: Start with underscore, e.g., `_paper_list.html`, `_paper_form.html`
 - ALL CSS: `src/static/css/style.css` (no `<style>` blocks in templates)
 
@@ -158,60 +102,74 @@ Privacy filtering happens at SQL level in both FTS and vector search. RRF consta
 - User → Tags (one-to-many, cascade delete)
 - Papers ↔ Tags (many-to-many via `paper_tags` table)
 - Paper → Embedding (one-to-one, cascade delete)
+- Embedding stores `embedding_vector` as bytes blob (not pgvector type)
 
 ## Testing
 
 Test fixtures in `tests/conftest.py`:
-- `test_db` - Fresh PostgreSQL database per test, runs Alembic migrations via `alembic upgrade head`
+- `test_db` - Fresh SQLite database per test, runs `init_db()` to create schema and FTS5
 - `client` - TestClient with overridden database dependency
 - `test_user` - User with `.login()` helper for session cookies
 - `sample_paper_data` - Pre-filled paper data
 
 Tests use session cookies (no manual headers needed after registration/login).
 
-Requires `TEST_DATABASE_URL` environment variable or uses default `postgresql://postgres:postgres@localhost:5432/papertrail_test`.
-Ensure PostgreSQL is running and accessible before running tests.
+Database file: `data/papertrail_test.db` (auto-created and cleaned up per test)
 
 ## Critical Implementation Details
 
 ### Paper Creation Flow
 When creating a paper (`POST /papers`):
 1. Create Paper model and save to DB
-2. Generated `search_vector` column auto-updates (PostgreSQL generated column)
+2. FTS5 triggers automatically insert into `papers_fts` virtual table
 3. Generate embedding from abstract + summary
-4. Store embedding in Embedding table (pgvector type)
+4. Store embedding as bytes in Embedding table
 
 ### Privacy Model
 - Papers have `is_private` flag
 - Search functions accept `user_id` parameter
-- FTS search: SQL filter `(is_private = false OR user_id = :user_id)`
+- FTS search: SQL filter `(is_private = 0 OR user_id = :user_id)`
 - Vector search: JOIN with papers table applying same filter
 - Anonymous users see only public papers
 
 ### Embedding Storage
-Embeddings stored as pgvector type:
+Embeddings stored as bytes blob:
 ```python
-# Store: embedding_vector column accepts list directly
-query_vector = embedding.tolist()
+# Store: convert numpy array to bytes
+embedding_bytes = embedding_vector.tobytes()
 
-# Query with cosine distance operator
-SELECT embedding_vector <=> :query_vector AS distance
-FROM embeddings
-ORDER BY distance
+# Retrieve: convert bytes back to numpy array
+paper_embedding = np.frombuffer(embedding_blob, dtype=np.float32)
 ```
 
 ## Configuration (`src/config.py`)
-Minimal environment configuration - only 3 settings via `.env`:
-- `DATABASE_URL` - PostgreSQL connection string (default: `postgresql://papertrail:papertrail_dev_password@localhost:5432/papertrail`)
-- `SECRET_KEY` - JWT signing key (must change in production, generate with: `python -c "import secrets; print(secrets.token_urlsafe(32))"`)
+Environment configuration via `.env`:
+- `DATABASE_URL` - SQLite file path (default: `sqlite:///./data/papertrail.db`)
+- `SECRET_KEY` - JWT signing key (must change in production)
 - `DEBUG` - Development mode flag (default: false)
+- `SINGLE_USER` - Single-user mode flag (default: false)
 
 All other settings hardcoded in `src/config.py`:
-- Embedding model: `Qwen/Qwen3-Embedding-0.6B`
+- Embedding model: `google/embeddinggemma-300m`
 - Token expiry: 30 minutes
 - Search limit: 50 results
 - RRF constant: k=60
 - Rate limit: 60 requests/minute
+
+## Single-User Mode
+
+When `SINGLE_USER=true`:
+- Registration blocked after first user (403 error)
+- `/register` page redirects to `/login`
+- "Register" link hidden in navigation
+- Root `/` redirects to `/papers` when logged in
+- Login/logout work normally
+
+Implementation details:
+- `src/routers/auth.py`: Checks user count before allowing registration
+- `src/main.py`: Redirects register page, adds root redirect, sets global template var
+- `src/templates/base.html`: JavaScript conditionally hides register link
+- Designed for personal/single-user deployments
 
 ## Frontend Conventions
 
@@ -230,12 +188,40 @@ Use `.content` wrapper from `base.html`. Do not create custom wrappers with diff
 ## Authentication
 HTTP-only session cookies (JWT in cookie). No client-side token management. Cookies sent automatically with requests.
 
+Cookie settings:
+- `httponly=True` - Cannot be accessed by JavaScript
+- `max_age=1800` seconds (30 minutes)
+- `samesite="lax"` - CSRF protection
+
 ## Deployment Notes
-Before production:
-1. Set strong `SECRET_KEY` environment variable (generate with: `python -c "import secrets; print(secrets.token_urlsafe(32))"`)
-2. Set `DATABASE_URL` to your managed PostgreSQL 18+ service with pgvector extension
-3. Ensure `DEBUG=false` in `.env`
+
+### Docker Deployment (Recommended)
+Single container with SQLite database in volume:
+
+```bash
+# Build and run
+make build
+make docker-run
+
+# Database persists in Docker volume: papertrail_data
+# Volume mounted at: /app/data
+```
+
+### Environment Variables for Production
+1. `SECRET_KEY` - Generate with: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+2. `SINGLE_USER=true` - For personal deployments
+3. `DEBUG=false`
+
+### Dokploy Deployment
+1. Deploy single Dockerfile (no docker-compose needed)
+2. Add volume mount: Container path `/app/data`
+3. Set environment variables in Dokploy UI (SECRET_KEY, SINGLE_USER)
+4. Database persists in named volume automatically
+
+### Production Checklist
+1. Set strong `SECRET_KEY` environment variable
+2. Ensure `DEBUG=false` in `.env`
+3. Set `SINGLE_USER=true` for personal use
 4. Set `secure=True` for cookies in `src/routers/auth.py` (requires HTTPS)
 5. Update CORS origins in `src/main.py` (remove `allow_origins=["*"]`)
-6. Run migrations: `make migrate` or `alembic upgrade head`
-7. Consider recreating IVFFlat index AFTER populating significant data with optimal `lists` parameter (sqrt of number of rows)
+6. Ensure volume is configured for `/app/data` to persist database

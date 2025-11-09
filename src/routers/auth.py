@@ -36,6 +36,15 @@ def register(user_data: UserCreate, response: Response, db: Session = Depends(ge
     Raises:
         HTTPException: If username or email already exists
     """
+    # Check if single-user mode is enabled and a user already exists
+    if settings.single_user:
+        user_count = db.query(User).count()
+        if user_count > 0:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Registration is disabled in single-user mode"
+            )
+
     # Check if username already exists
     if db.query(User).filter(User.username == user_data.username).first():
         raise HTTPException(

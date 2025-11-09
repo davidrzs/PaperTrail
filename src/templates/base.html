@@ -56,6 +56,7 @@
     <script>
     // Check if user is logged in and update nav
     const authLinksContainer = document.getElementById('auth-links');
+    const singleUserMode = {{ 'true' if single_user else 'false' }};
 
     // Fetch current user (cookie is sent automatically)
     fetch('/auth/me')
@@ -69,11 +70,21 @@
                     <a href="#" onclick="logout(); return false;">logout</a>
                 `;
             } else {
-                authLinksContainer.innerHTML = `<a href="/login">login</a><a href="/register">register</a>`;
+                // Hide register link in single-user mode
+                if (singleUserMode) {
+                    authLinksContainer.innerHTML = `<a href="/login">login</a>`;
+                } else {
+                    authLinksContainer.innerHTML = `<a href="/login">login</a><a href="/register">register</a>`;
+                }
             }
         })
         .catch(() => {
-            authLinksContainer.innerHTML = `<a href="/login">login</a><a href="/register">register</a>`;
+            // Hide register link in single-user mode
+            if (singleUserMode) {
+                authLinksContainer.innerHTML = `<a href="/login">login</a>`;
+            } else {
+                authLinksContainer.innerHTML = `<a href="/login">login</a><a href="/register">register</a>`;
+            }
         });
 
     async function logout() {

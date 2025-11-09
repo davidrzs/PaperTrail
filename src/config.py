@@ -13,10 +13,13 @@ class Settings(BaseSettings):
     secret_key: str = "your-secret-key-here-change-in-production"
     debug: bool = False
 
+    # Single User Mode
+    single_user: bool = False
+
     # Hardcoded application settings
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
-    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"
+    embedding_model: str = "google/embeddinggemma-300m"
     app_name: str = "PaperTrail"
     app_version: str = "0.1.0"
     rate_limit_per_minute: int = 60

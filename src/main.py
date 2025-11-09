@@ -2,7 +2,7 @@
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -36,6 +36,9 @@ app.mount("/static", StaticFiles(directory="src/static"), name="static")
 
 # Jinja2 templates
 templates = Jinja2Templates(directory="src/templates")
+
+# Add global template context
+templates.env.globals["single_user"] = settings.single_user
 
 # Include routers
 app.include_router(auth.router)
@@ -76,6 +79,10 @@ async def home(
     """Home page with recent papers and statistics"""
     from src.models import Paper
 
+    # In single-user mode, redirect to papers list if logged in
+    if settings.single_user and current_user:
+        return RedirectResponse(url="/papers", status_code=302)
+
     # Get recent papers (public + user's private if logged in)
     query = db.query(Paper)
     if current_user:
@@ -113,8 +120,16 @@ async def login_page(request: Request):
 
 
 @app.get("/register", response_class=HTMLResponse)
-async def register_page(request: Request):
+async def register_page(request: Request, db: Session = Depends(get_db)):
     """Registration page"""
+    # Check if single-user mode is enabled and a user already exists
+    if settings.single_user:
+        from src.models import User
+        user_count = db.query(User).count()
+        if user_count > 0:
+            # Redirect to login page instead
+            return RedirectResponse(url="/login", status_code=302)
+
     return templates.TemplateResponse(
         "register.html",
         {"request": request}

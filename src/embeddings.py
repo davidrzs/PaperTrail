@@ -1,18 +1,25 @@
-"""Embedding generation using Qwen3-Embedding-0.6B model"""
+"""Embedding generation using EmbeddingGemma model"""
 
+import os
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from typing import Optional
 
 from src.config import settings
 
+# Load HF token from environment
+HF_TOKEN = os.getenv("HF_TOKEN")
+
 # Global model instance (loaded once on startup)
 _model: Optional[SentenceTransformer] = None
+
+# EmbeddingGemma supports 2048 tokens max
+MAX_TEXT_LENGTH = 8000  # Conservative char limit (~2048 tokens)
 
 
 def load_model() -> SentenceTransformer:
     """
-    Load the Qwen3-Embedding-0.6B model.
+    Load the EmbeddingGemma model.
 
     This should be called once on application startup.
     The model is cached globally for subsequent calls.
@@ -21,7 +28,10 @@ def load_model() -> SentenceTransformer:
 
     if _model is None:
         print(f"Loading embedding model: {settings.embedding_model}")
-        _model = SentenceTransformer(settings.embedding_model)
+        _model = SentenceTransformer(
+            settings.embedding_model,
+            token=HF_TOKEN
+        )
         print(f"Model loaded successfully. Embedding dimension: {_model.get_sentence_embedding_dimension()}")
 
     return _model
@@ -34,20 +44,39 @@ def get_model() -> SentenceTransformer:
     return _model
 
 
-def generate_embedding(text: str) -> np.ndarray:
+def truncate_text(text: str, max_length: int = MAX_TEXT_LENGTH) -> str:
     """
-    Generate embedding for a given text using Qwen model.
+    Truncate text to max_length characters if needed.
 
     Args:
-        text: Input text to embed
+        text: Input text
+        max_length: Maximum character length
 
     Returns:
-        Numpy array of embedding vector
+        Truncated text
+    """
+    if len(text) <= max_length:
+        return text
+    return text[:max_length]
+
+
+def generate_embedding(text: str) -> np.ndarray:
+    """
+    Generate embedding for a query text using EmbeddingGemma.
+
+    Args:
+        text: Input query text to embed
+
+    Returns:
+        Numpy array of embedding vector (768 dimensions)
     """
     model = get_model()
 
-    # Use query prompt for better search results
-    embedding = model.encode([text], prompt_name="query")[0]
+    # Truncate if too long
+    text = truncate_text(text)
+
+    # Use encode_query for query text (applies task-specific prompt)
+    embedding = model.encode_query(text)
 
     return embedding
 
@@ -61,8 +90,10 @@ def generate_paper_embedding(abstract: Optional[str], summary: str) -> np.ndarra
         summary: Paper summary (required)
 
     Returns:
-        Numpy array of embedding vector
+        Numpy array of embedding vector (768 dimensions)
     """
+    model = get_model()
+
     # Combine abstract (if present) and summary
     parts = []
     if abstract:
@@ -71,7 +102,13 @@ def generate_paper_embedding(abstract: Optional[str], summary: str) -> np.ndarra
 
     text = "\n\n".join(parts)
 
-    return generate_embedding(text)
+    # Truncate if too long
+    text = truncate_text(text)
+
+    # Use encode_document for paper text (applies document-specific prompt)
+    embedding = model.encode_document(text)
+
+    return embedding
 
 
 def get_embedding_dimension() -> int:

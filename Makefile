@@ -32,7 +32,7 @@ docker-run:
 		--name $(CONTAINER_NAME) \
 		-p $(PORT):8000 \
 		-v papertrail_data:/app/data \
-		--env-file .env \
+		-e SECRET_KEY="${SECRET_KEY}" \
 		$(IMAGE_NAME)
 
 docker-stop:
