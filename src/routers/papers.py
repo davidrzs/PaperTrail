@@ -230,16 +230,21 @@ def search_papers(
     # Sort by score to maintain order
     search_results.sort(key=lambda x: x["score"], reverse=True)
 
-    # Check if this is an HTMX request (returns HTML) or API request (returns JSON)
-    if request.headers.get("HX-Request"):
-        # Return HTML fragment for HTMX
+    # Check if this is a browser request (HTML) or API request (JSON)
+    accept = request.headers.get("accept", "")
+    if "text/html" in accept:
+        # Return HTML page for browser requests
+        from src.auth import get_user_profile
+
         return templates.TemplateResponse(
             "search_results.html",
             {
                 "request": request,
                 "results": search_results,
                 "query": q,
-                "total": len(search_results)
+                "total": len(search_results),
+                "is_authenticated": is_authenticated,
+                "user_profile": get_user_profile()
             }
         )
     else:

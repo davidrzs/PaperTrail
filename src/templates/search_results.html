@@ -1,8 +1,142 @@
-<div class="papers-list">
+{% extends "base.html" %}
+
+{% block title %}Search: {{ query }} - PaperTrail{% endblock %}
+
+{% block content %}
+<!-- User Profile Header -->
+<div class="user-feed-header">
+    <h2>{{ user_profile.display_name }}</h2>
+</div>
+
+{% if user_profile.bio %}
+<div class="user-bio">
+    <div id="bio-content"></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+<script>
+    const bioText = {{ user_profile.bio | tojson }};
+    const bioContent = document.getElementById('bio-content');
+    bioContent.innerHTML = marked.parse(bioText);
+
+    // Render KaTeX in the bio when it's loaded
+    if (typeof renderMathInElement !== 'undefined') {
+        renderMathInElement(bioContent, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false},
+                {left: '\\[', right: '\\]', display: true},
+                {left: '\\(', right: '\\)', display: false}
+            ],
+            throwOnError: false
+        });
+    } else {
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof renderMathInElement !== 'undefined') {
+                renderMathInElement(bioContent, {
+                    delimiters: [
+                        {left: '$$', right: '$$', display: true},
+                        {left: '$', right: '$', display: false},
+                        {left: '\\[', right: '\\]', display: true},
+                        {left: '\\(', right: '\\)', display: false}
+                    ],
+                    throwOnError: false
+                });
+            }
+        });
+    }
+</script>
+{% endif %}
+
+{% if user_profile.show_heatmap %}
+<div style="margin: 24px 0;">
+    <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #2c3e50;">Reading Activity</h3>
+    <div id="activity-heatmap" style="display: flex; gap: 3px; flex-wrap: wrap; max-width: 800px;"></div>
+    <div style="margin-top: 8px; font-size: 12px; color: #6c757d;">
+        <span style="margin-right: 8px;">Less</span>
+        <span style="display: inline-block; width: 10px; height: 10px; background: #ebedf0; border: 1px solid #e0e0e0;"></span>
+        <span style="display: inline-block; width: 10px; height: 10px; background: #9be9a8; border: 1px solid #e0e0e0; margin-left: 3px;"></span>
+        <span style="display: inline-block; width: 10px; height: 10px; background: #40c463; border: 1px solid #e0e0e0; margin-left: 3px;"></span>
+        <span style="display: inline-block; width: 10px; height: 10px; background: #30a14e; border: 1px solid #e0e0e0; margin-left: 3px;"></span>
+        <span style="display: inline-block; width: 10px; height: 10px; background: #216e39; border: 1px solid #e0e0e0; margin-left: 3px;"></span>
+        <span style="margin-left: 8px;">More</span>
+    </div>
+</div>
+
+<script>
+    fetch('/papers/activity')
+        .then(res => res.json())
+        .then(data => {
+            const container = document.getElementById('activity-heatmap');
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            const formatLocalDate = (d) => {
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            };
+
+            const oneYearAgo = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate());
+            oneYearAgo.setHours(0, 0, 0, 0);
+
+            const dates = [];
+            const currentDate = new Date(oneYearAgo);
+            const endDate = new Date(today);
+            endDate.setDate(endDate.getDate() + 1);
+            while (currentDate < endDate) {
+                dates.push(new Date(currentDate));
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+
+            dates.forEach(date => {
+                const dateStr = formatLocalDate(date);
+                const count = data[dateStr] || 0;
+
+                let color;
+                if (count === 0) color = '#ebedf0';
+                else if (count === 1) color = '#9be9a8';
+                else if (count === 2) color = '#40c463';
+                else if (count === 3) color = '#30a14e';
+                else color = '#216e39';
+
+                const square = document.createElement('div');
+                square.style.width = '10px';
+                square.style.height = '10px';
+                square.style.backgroundColor = color;
+                square.style.border = '1px solid #e0e0e0';
+                square.style.borderRadius = '2px';
+                square.title = `${dateStr}: ${count} paper${count !== 1 ? 's' : ''}`;
+
+                container.appendChild(square);
+            });
+        })
+        .catch(err => console.error('Heatmap error:', err));
+</script>
+{% endif %}
+
+<!-- Search Results Section -->
+<div class="papers-section">
     {% if results %}
         <div class="search-info">
-            <h2>Search Results</h2>
-            <p class="subtext">Found {{ total }} papers for "{{ query }}"</p>
+            <h3>Search Results for "{{ query }}"</h3>
+            <p class="subtext">Found {{ total }} papers</p>
+        </div>
+
+        <!-- Search Bar -->
+        <div class="search-container">
+            <form action="/papers/search" method="get" style="display: flex; gap: 8px; margin-bottom: 24px;">
+                <input
+                    type="search"
+                    name="q"
+                    id="search-input"
+                    placeholder="Search papers..."
+                    value="{{ query }}"
+                    autocomplete="off"
+                    required
+                />
+                <button type="submit" class="btn">Search</button>
+            </form>
         </div>
 
         {% set papers = results %}
@@ -10,8 +144,25 @@
         {% include "_paper_list.html" %}
     {% else %}
         <div class="no-results">
-            <h2>No Results</h2>
+            <h3>No Results</h3>
             <p class="subtext">No papers found for "{{ query }}"</p>
+
+            <!-- Search Bar -->
+            <div class="search-container">
+                <form action="/papers/search" method="get" style="display: flex; gap: 8px; margin-top: 24px;">
+                    <input
+                        type="search"
+                        name="q"
+                        id="search-input"
+                        placeholder="Search papers..."
+                        value="{{ query }}"
+                        autocomplete="off"
+                        required
+                    />
+                    <button type="submit" class="btn">Search</button>
+                </form>
+            </div>
         </div>
     {% endif %}
 </div>
+{% endblock %}
