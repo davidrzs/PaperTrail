@@ -124,6 +124,21 @@
 <div class="papers-section">
     <h3>Papers ({{ total }})</h3>
 
+    <!-- Search Bar -->
+    <div class="search-container">
+        <form action="/papers/search" method="get" style="display: flex; gap: 8px; margin-bottom: 24px;">
+            <input
+                type="search"
+                name="q"
+                id="search-input"
+                placeholder="Search papers..."
+                autocomplete="off"
+                required
+            />
+            <button type="submit" class="btn">Search</button>
+        </form>
+    </div>
+
     {% set show_actions = False %}
     {% include "_paper_list.html" %}
 </div>
