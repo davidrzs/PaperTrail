@@ -52,12 +52,66 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
+def migrate_fts_triggers():
+    """
+    Migrate FTS5 triggers to add COALESCE to summary field.
+
+    This is a one-time migration to fix encoding issues with summary field.
+    Safe to run multiple times - checks if migration is needed first.
+    """
+    with engine.connect() as conn:
+        # Check if trigger needs updating
+        result = conn.execute(
+            text("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='papers_fts_update'")
+        )
+        row = result.fetchone()
+
+        if row and "COALESCE(new.summary" not in row[0]:
+            print("Migrating FTS5 triggers to add COALESCE to summary field...")
+
+            # Drop old triggers
+            conn.execute(text("DROP TRIGGER IF EXISTS papers_fts_insert"))
+            conn.execute(text("DROP TRIGGER IF EXISTS papers_fts_update"))
+            conn.execute(text("DROP TRIGGER IF EXISTS papers_fts_delete"))
+
+            # Recreate with COALESCE on summary
+            conn.execute(text("""
+                CREATE TRIGGER papers_fts_insert AFTER INSERT ON papers BEGIN
+                    INSERT INTO papers_fts(rowid, title, authors, abstract, summary)
+                    VALUES (new.id, new.title, new.authors, COALESCE(new.abstract, ''), COALESCE(new.summary, ''));
+                END
+            """))
+
+            conn.execute(text("""
+                CREATE TRIGGER papers_fts_update AFTER UPDATE ON papers BEGIN
+                    UPDATE papers_fts
+                    SET title=new.title,
+                        authors=new.authors,
+                        abstract=COALESCE(new.abstract, ''),
+                        summary=COALESCE(new.summary, '')
+                    WHERE rowid=old.id;
+                END
+            """))
+
+            conn.execute(text("""
+                CREATE TRIGGER papers_fts_delete AFTER DELETE ON papers BEGIN
+                    DELETE FROM papers_fts WHERE rowid=old.id;
+                END
+            """))
+
+            conn.commit()
+            print("✓ FTS5 triggers migrated successfully!")
+        else:
+            print("FTS5 triggers already up to date")
+
+
 def init_db():
     """
     Initialize database:
     - Create all tables
     - Set up FTS5 virtual table
     - Create triggers for FTS5 sync
+    - Run any pending migrations
     """
     from src.models import Base  # Import here to avoid circular dependency
 
@@ -87,7 +141,7 @@ def init_db():
             conn.execute(text("""
                 CREATE TRIGGER papers_fts_insert AFTER INSERT ON papers BEGIN
                     INSERT INTO papers_fts(rowid, title, authors, abstract, summary)
-                    VALUES (new.id, new.title, new.authors, COALESCE(new.abstract, ''), new.summary);
+                    VALUES (new.id, new.title, new.authors, COALESCE(new.abstract, ''), COALESCE(new.summary, ''));
                 END
             """))
 
@@ -97,7 +151,7 @@ def init_db():
                     SET title=new.title,
                         authors=new.authors,
                         abstract=COALESCE(new.abstract, ''),
-                        summary=new.summary
+                        summary=COALESCE(new.summary, '')
                     WHERE rowid=old.id;
                 END
             """))
@@ -112,3 +166,6 @@ def init_db():
             print("Database initialized with FTS5 support")
         else:
             print("Database already initialized")
+
+    # Run migrations for existing databases
+    migrate_fts_triggers()

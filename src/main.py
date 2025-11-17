@@ -61,6 +61,17 @@ async def startup_event():
         print("Search functionality will not be available.")
 
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean shutdown - ensure database connections are properly closed"""
+    from src.database import engine
+
+    print("Shutting down gracefully...")
+    # Dispose of all database connections in the pool
+    engine.dispose()
+    print("Database connections closed")
+
+
 @app.get("/health")
 def health_check():
     """Health check endpoint"""

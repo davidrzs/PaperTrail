@@ -35,5 +35,6 @@ ENV PYTHONUNBUFFERED=1
 ENV DATABASE_URL=sqlite:///./data/papertrail.db
 
 # Run database initialization on startup, then start server
+# --timeout-graceful-shutdown allows clean shutdown of database connections
 CMD uv run python -c "from src.database import init_db; init_db()" && \
-    uv run uvicorn src.main:app --host 0.0.0.0 --port 8000
+    uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 30
