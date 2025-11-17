@@ -6,17 +6,14 @@
 <div class="paper-detail">
     <!-- Paper metadata -->
     <div class="paper-meta">
-        <span class="meta-item">
-            by <a href="/users/{{ paper.user.username }}">{{ paper.user.display_name or paper.user.username }}</a>
-        </span>
         {% if paper.date_read %}
         <span class="meta-item">read {{ paper.date_read.strftime('%d-%m-%Y') }}</span>
         {% endif %}
-        <span class="meta-item">{{ paper.created_at.strftime('%d-%m-%Y') }}</span>
+        <span class="meta-item">added {{ paper.created_at.strftime('%d-%m-%Y') }}</span>
         {% if paper.is_private %}
         <span class="meta-item private-badge">[private]</span>
         {% endif %}
-        {% if is_owner %}
+        {% if is_authenticated %}
         <span class="meta-item">
             <a href="/papers/{{ paper.id }}/edit">edit</a>
         </span>

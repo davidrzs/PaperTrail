@@ -9,9 +9,8 @@ from fastapi.templating import Jinja2Templates
 from src.config import settings
 from src.database import get_db
 from src.embeddings import load_model
-from src.routers import auth, papers, tags, users
-from src.auth import get_current_user, get_current_user_optional
-from src.models import User
+from src.routers import auth, papers, tags
+from src.auth import require_auth, get_auth_status, get_user_profile
 from sqlalchemy.orm import Session
 
 # Create FastAPI app
@@ -38,13 +37,12 @@ app.mount("/static", StaticFiles(directory="src/static"), name="static")
 templates = Jinja2Templates(directory="src/templates")
 
 # Add global template context
-templates.env.globals["single_user"] = settings.single_user
+templates.env.globals["user_profile"] = get_user_profile()
 
 # Include routers
 app.include_router(auth.router)
 app.include_router(papers.router)
 app.include_router(tags.router)
-app.include_router(users.router)
 
 
 @app.on_event("startup")
@@ -73,39 +71,31 @@ def health_check():
 @app.get("/", response_class=HTMLResponse)
 async def home(
     request: Request,
-    current_user: User = Depends(get_current_user_optional),
+    is_authenticated: bool = Depends(get_auth_status),
     db: Session = Depends(get_db)
 ):
     """Home page with recent papers and statistics"""
     from src.models import Paper
 
-    # In single-user mode, redirect to user's feed page if logged in
-    if settings.single_user and current_user:
-        return RedirectResponse(url=f"/users/{current_user.username}/feed", status_code=302)
+    # If authenticated, redirect to papers page
+    if is_authenticated:
+        return RedirectResponse(url="/papers", status_code=302)
 
-    # Get recent papers (public + user's private if logged in)
-    query = db.query(Paper)
-    if current_user:
-        query = query.filter(
-            (Paper.is_private == False) | (Paper.user_id == current_user.id)
-        )
-    else:
-        query = query.filter(Paper.is_private == False)
-
-    recent_papers = query.order_by(Paper.created_at.desc()).limit(20).all()
+    # Get recent public papers
+    recent_papers = db.query(Paper).filter(
+        Paper.is_private == False
+    ).order_by(Paper.created_at.desc()).limit(20).all()
 
     # Get statistics
     total_papers = db.query(Paper).filter(Paper.is_private == False).count()
-    total_users = db.query(User).count()
 
     return templates.TemplateResponse(
         "home.html",
         {
             "request": request,
-            "user": current_user,
+            "is_authenticated": is_authenticated,
             "recent_papers": recent_papers,
-            "total_papers": total_papers,
-            "total_users": total_users
+            "total_papers": total_papers
         }
     )
 
@@ -119,29 +109,12 @@ async def login_page(request: Request):
     )
 
 
-@app.get("/register", response_class=HTMLResponse)
-async def register_page(request: Request, db: Session = Depends(get_db)):
-    """Registration page"""
-    # Check if single-user mode is enabled and a user already exists
-    if settings.single_user:
-        from src.models import User
-        user_count = db.query(User).count()
-        if user_count > 0:
-            # Redirect to login page instead
-            return RedirectResponse(url="/login", status_code=302)
-
-    return templates.TemplateResponse(
-        "register.html",
-        {"request": request}
-    )
-
-
 @app.get("/settings", response_class=HTMLResponse)
-async def settings_page(request: Request, current_user: User = Depends(get_current_user)):
-    """Settings page"""
+async def settings_page(request: Request, _: bool = Depends(require_auth)):
+    """Profile/settings page (read-only, shows env config)"""
     return templates.TemplateResponse(
         "settings.html",
-        {"request": request, "user": current_user}
+        {"request": request}
     )
 
 

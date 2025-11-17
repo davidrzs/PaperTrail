@@ -133,107 +133,20 @@ def client(test_db: Session) -> TestClient:
 
 
 @pytest.fixture
-def test_user(client: TestClient) -> dict:
-    """Create a test user and return user data with login helper"""
-    user_data = {
-        "username": "testuser",
-        "email": "test@example.com",
-        "password": "testpass123",
-        "display_name": "Test User"
-    }
+def authenticated_client(client: TestClient) -> TestClient:
+    """Return a client that is authenticated with admin credentials"""
+    # Login with admin credentials from env
+    response = client.post(
+        "/auth/login",
+        data={
+            "username": settings.admin_username,
+            "password": settings.admin_password
+        }
+    )
+    assert response.status_code == 200, f"Login failed: {response.json()}"
 
-    # Register user (cookie is set automatically)
-    response = client.post("/auth/register", json=user_data)
-    assert response.status_code == 201
-
-    def login_as_user():
-        """Helper to re-login as this user (sets cookie)"""
-        login_resp = client.post(
-            "/auth/login",
-            data={"username": user_data["username"], "password": user_data["password"]}
-        )
-        assert login_resp.status_code == 200
-
-    return {
-        **user_data,
-        "id": response.json()["id"],
-        "headers": {},  # Keep for backwards compatibility but empty
-        "login": login_as_user
-    }
-
-
-@pytest.fixture
-def test_user_obj(client: TestClient, test_db: Session):
-    """Create a test user and return User object (for search tests)"""
-    from src.models import User
-
-    # In single-user mode, check if a user already exists
-    if settings.single_user:
-        existing_user = test_db.query(User).first()
-        if existing_user:
-            return existing_user
-
-    user_data = {
-        "username": "testuserobj",
-        "email": "testuserobj@example.com",
-        "password": "testpass123",
-        "display_name": "Test User Obj"
-    }
-
-    # Register user
-    response = client.post("/auth/register", json=user_data)
-    assert response.status_code == 201
-
-    user_id = response.json()["id"]
-
-    # Fetch and return the User object from database
-    user = test_db.query(User).filter(User.id == user_id).first()
-    assert user is not None
-
-    return user
-
-
-@pytest.fixture
-def auth_headers(test_user: dict) -> dict:
-    """Return authentication headers for test user"""
-    return test_user["headers"]
-
-
-@pytest.fixture
-def second_user(client: TestClient) -> dict:
-    """Create a second test user with login helper
-
-    In single-user mode, this will skip tests that require a second user.
-    """
-    # Skip creating second user in single-user mode
-    if settings.single_user:
-        pytest.skip("Second user creation not allowed in single-user mode")
-
-    user_data = {
-        "username": "seconduser",
-        "email": "second@example.com",
-        "password": "secondpass123",
-        "display_name": "Second User"
-    }
-
-    # Register user (cookie is set automatically and overwrites previous user's cookie)
-    response = client.post("/auth/register", json=user_data)
-    assert response.status_code == 201
-
-    def login_as_user():
-        """Helper to re-login as this user (sets cookie)"""
-        login_resp = client.post(
-            "/auth/login",
-            data={"username": user_data["username"], "password": user_data["password"]}
-        )
-        assert login_resp.status_code == 200
-
-    return {
-        **user_data,
-        "id": response.json()["id"],
-        "headers": {},  # Keep for backwards compatibility but empty
-        "login": login_as_user
-    }
+    # Cookie is set automatically in client
+    return client
 
 
 @pytest.fixture
@@ -256,35 +169,3 @@ def sample_paper_data() -> dict:
 def db_session(test_db: Session) -> Session:
     """Alias for test_db for consistency in test naming"""
     return test_db
-
-
-@pytest.fixture
-def test_user2(client: TestClient, test_db: Session):
-    """Create a second test user and return User object
-
-    In single-user mode, this will skip tests that require a second user.
-    """
-    from src.models import User
-
-    # Skip creating second user in single-user mode
-    if settings.single_user:
-        pytest.skip("Second user creation not allowed in single-user mode")
-
-    user_data = {
-        "username": "testuser2",
-        "email": "test2@example.com",
-        "password": "testpass123",
-        "display_name": "Test User 2"
-    }
-
-    # Register user
-    response = client.post("/auth/register", json=user_data)
-    assert response.status_code == 201
-
-    user_id = response.json()["id"]
-
-    # Fetch and return the User object from database
-    user = test_db.query(User).filter(User.id == user_id).first()
-    assert user is not None
-
-    return user

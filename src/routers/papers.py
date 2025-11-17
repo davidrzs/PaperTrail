@@ -7,10 +7,10 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from src.auth import get_current_user, get_current_user_optional
+from src.auth import require_auth, get_auth_status
 from src.database import get_db
 from src.embeddings import generate_paper_embedding
-from src.models import Embedding, Paper, Tag, User
+from src.models import Embedding, Paper, Tag
 from src.schemas import PaperCreate, PaperList, PaperListItem, PaperResponse, PaperUpdate, SearchResponse, SearchResult
 from src.search import hybrid_search
 
@@ -18,14 +18,13 @@ router = APIRouter(prefix="/papers", tags=["papers"])
 templates = Jinja2Templates(directory="src/templates")
 
 
-def get_or_create_tags(db: Session, tag_names: List[str], user_id: int) -> List[Tag]:
+def get_or_create_tags(db: Session, tag_names: List[str]) -> List[Tag]:
     """
-    Get existing tags or create new ones for a user.
+    Get existing tags or create new ones.
 
     Args:
         db: Database session
         tag_names: List of tag names
-        user_id: User ID
 
     Returns:
         List of Tag objects
@@ -36,15 +35,12 @@ def get_or_create_tags(db: Session, tag_names: List[str], user_id: int) -> List[
         if not name:
             continue
 
-        # Try to find existing tag for this user
-        tag = db.query(Tag).filter(
-            Tag.name == name,
-            Tag.user_id == user_id
-        ).first()
+        # Try to find existing tag
+        tag = db.query(Tag).filter(Tag.name == name).first()
 
         if not tag:
             # Create new tag
-            tag = Tag(name=name, user_id=user_id)
+            tag = Tag(name=name)
             db.add(tag)
 
         tags.append(tag)
@@ -55,7 +51,7 @@ def get_or_create_tags(db: Session, tag_names: List[str], user_id: int) -> List[
 @router.post("", response_model=PaperResponse, status_code=status.HTTP_201_CREATED)
 def create_paper(
     paper_data: PaperCreate,
-    current_user: User = Depends(get_current_user),
+    _: bool = Depends(require_auth),
     db: Session = Depends(get_db)
 ):
     """
@@ -63,7 +59,7 @@ def create_paper(
 
     Args:
         paper_data: Paper creation data
-        current_user: Authenticated user
+        _: Authentication check
         db: Database session
 
     Returns:
@@ -71,7 +67,6 @@ def create_paper(
     """
     # Create paper
     db_paper = Paper(
-        user_id=current_user.id,
         title=paper_data.title,
         authors=paper_data.authors,
         arxiv_id=paper_data.arxiv_id,
@@ -85,7 +80,7 @@ def create_paper(
 
     # Handle tags
     if paper_data.tags:
-        db_paper.tags = get_or_create_tags(db, paper_data.tags, current_user.id)
+        db_paper.tags = get_or_create_tags(db, paper_data.tags)
 
     db.add(db_paper)
     db.commit()
@@ -116,26 +111,24 @@ def create_paper(
 @router.get("")
 def list_papers(
     request: Request,
-    user_id: Optional[int] = Query(None, description="Filter by user ID"),
     tag: Optional[str] = Query(None, description="Filter by tag name"),
     limit: int = Query(50, ge=1, le=100, description="Number of results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    is_authenticated: bool = Depends(get_auth_status),
     db: Session = Depends(get_db)
 ):
     """
     List papers with optional filters.
 
-    Returns public papers + authenticated user's private papers.
+    Returns public papers for anonymous users, all papers for authenticated user.
     Returns HTML for browser requests, JSON for API requests.
 
     Args:
         request: FastAPI request object
-        user_id: Optional filter by user ID
         tag: Optional filter by tag name
         limit: Number of results (1-100)
         offset: Pagination offset
-        current_user: Optional authenticated user
+        is_authenticated: Whether user is authenticated
         db: Database session
 
     Returns:
@@ -145,18 +138,9 @@ def list_papers(
     query = db.query(Paper)
 
     # Filter by visibility
-    if current_user:
-        # Show public papers + own private papers
-        query = query.filter(
-            (Paper.is_private == False) | (Paper.user_id == current_user.id)
-        )
-    else:
-        # Show only public papers
+    if not is_authenticated:
+        # Anonymous users see only public papers
         query = query.filter(Paper.is_private == False)
-
-    # Filter by user
-    if user_id is not None:
-        query = query.filter(Paper.user_id == user_id)
 
     # Filter by tag
     if tag:
@@ -172,7 +156,7 @@ def list_papers(
     accept = request.headers.get("accept", "")
     if "text/html" in accept:
         # Return HTML page
-        filter_info = f"Tag: {tag}" if tag else (f"User ID: {user_id}" if user_id else "All Papers")
+        filter_info = f"Tag: {tag}" if tag else "All Papers"
         return templates.TemplateResponse(
             "papers_list.html",
             {
@@ -181,7 +165,7 @@ def list_papers(
                 "total": total,
                 "filter_info": filter_info,
                 "tag": tag,
-                "user": current_user
+                "is_authenticated": is_authenticated
             }
         )
     else:
@@ -199,30 +183,27 @@ def search_papers(
     request: Request,
     q: str = Query(..., min_length=1, description="Search query"),
     limit: int = Query(50, ge=1, le=100, description="Number of results"),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    is_authenticated: bool = Depends(get_auth_status),
     db: Session = Depends(get_db)
 ):
     """
     Hybrid search for papers using FTS5 + vector similarity with RRF.
 
-    Searches across all public papers + authenticated user's private papers.
+    Searches across public papers (or all papers if authenticated).
     Returns HTML for HTMX requests, JSON for API calls.
 
     Args:
         request: FastAPI request object
         q: Search query
         limit: Maximum number of results
-        current_user: Optional authenticated user
+        is_authenticated: Whether user is authenticated
         db: Database session
 
     Returns:
         Search results with RRF scores (HTML or JSON)
     """
-    # Get user ID if authenticated
-    user_id = current_user.id if current_user else None
-
     # Perform hybrid search
-    results = hybrid_search(db, q, limit=limit, user_id=user_id)
+    results = hybrid_search(db, q, limit=limit, is_authenticated=is_authenticated)
 
     # Fetch paper details
     paper_ids = [paper_id for paper_id, score in results]
@@ -240,8 +221,7 @@ def search_papers(
             "authors": paper.authors,
             "summary": paper.summary,
             "score": score_map[paper.id],
-            "tags": [{"id": t.id, "name": t.name} for t in paper.tags],
-            "user": {"username": paper.user.username, "display_name": paper.user.display_name, "bio": paper.user.bio}
+            "tags": [{"id": t.id, "name": t.name} for t in paper.tags]
         })
 
     # Sort by score to maintain order
@@ -271,7 +251,7 @@ def search_papers(
 @router.get("/new", response_class=HTMLResponse)
 async def new_paper_form(
     request: Request,
-    current_user: User = Depends(get_current_user)
+    _: bool = Depends(require_auth)
 ):
     """
     New paper form page (HTML).
@@ -280,7 +260,7 @@ async def new_paper_form(
     """
     return templates.TemplateResponse(
         "paper_form.html",
-        {"request": request, "user": current_user}
+        {"request": request, "is_authenticated": True}
     )
 
 
@@ -288,13 +268,13 @@ async def new_paper_form(
 async def edit_paper_form(
     request: Request,
     paper_id: int,
-    current_user: User = Depends(get_current_user),
+    _: bool = Depends(require_auth),
     db: Session = Depends(get_db)
 ):
     """
     Edit paper form page (HTML).
 
-    Requires authentication and ownership.
+    Requires authentication.
     """
     paper = db.query(Paper).filter(Paper.id == paper_id).first()
 
@@ -304,16 +284,9 @@ async def edit_paper_form(
             detail="Paper not found"
         )
 
-    # Check ownership
-    if paper.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to edit this paper"
-        )
-
     return templates.TemplateResponse(
         "paper_edit.html",
-        {"request": request, "user": current_user, "paper": paper}
+        {"request": request, "is_authenticated": True, "paper": paper}
     )
 
 
@@ -321,7 +294,7 @@ async def edit_paper_form(
 def get_paper(
     request: Request,
     paper_id: int,
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    is_authenticated: bool = Depends(get_auth_status),
     db: Session = Depends(get_db)
 ):
     """
@@ -332,7 +305,7 @@ def get_paper(
     Args:
         request: FastAPI request object
         paper_id: Paper ID
-        current_user: Optional authenticated user
+        is_authenticated: Whether user is authenticated
         db: Database session
 
     Returns:
@@ -350,13 +323,11 @@ def get_paper(
         )
 
     # Check visibility
-    is_owner = current_user and paper.user_id == current_user.id
-    if paper.is_private:
-        if not is_owner:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Paper not found"
-            )
+    if paper.is_private and not is_authenticated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Paper not found"
+        )
 
     # Check if browser request (Accept: text/html) vs API request
     accept_header = request.headers.get("accept", "")
@@ -367,8 +338,7 @@ def get_paper(
             {
                 "request": request,
                 "paper": paper,
-                "is_owner": is_owner,
-                "user": current_user
+                "is_authenticated": is_authenticated
             }
         )
     else:
@@ -380,25 +350,25 @@ def get_paper(
 def update_paper(
     paper_id: int,
     paper_data: PaperUpdate,
-    current_user: User = Depends(get_current_user),
+    _: bool = Depends(require_auth),
     db: Session = Depends(get_db)
 ):
     """
     Update a paper.
 
-    Only the paper owner can update.
+    Requires authentication.
 
     Args:
         paper_id: Paper ID
         paper_data: Paper update data
-        current_user: Authenticated user
+        _: Authentication check
         db: Database session
 
     Returns:
         Updated paper object
 
     Raises:
-        HTTPException: If paper not found or not authorized
+        HTTPException: If paper not found
     """
     paper = db.query(Paper).filter(Paper.id == paper_id).first()
 
@@ -408,13 +378,6 @@ def update_paper(
             detail="Paper not found"
         )
 
-    # Check ownership
-    if paper.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to edit this paper"
-        )
-
     # Update fields
     update_data = paper_data.model_dump(exclude_unset=True)
 
@@ -422,7 +385,7 @@ def update_paper(
     if "tags" in update_data:
         tag_names = update_data.pop("tags")
         if tag_names is not None:
-            paper.tags = get_or_create_tags(db, tag_names, current_user.id)
+            paper.tags = get_or_create_tags(db, tag_names)
 
     # Update other fields
     for field, value in update_data.items():
@@ -437,21 +400,21 @@ def update_paper(
 @router.delete("/{paper_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_paper(
     paper_id: int,
-    current_user: User = Depends(get_current_user),
+    _: bool = Depends(require_auth),
     db: Session = Depends(get_db)
 ):
     """
     Delete a paper.
 
-    Only the paper owner can delete.
+    Requires authentication.
 
     Args:
         paper_id: Paper ID
-        current_user: Authenticated user
+        _: Authentication check
         db: Database session
 
     Raises:
-        HTTPException: If paper not found or not authorized
+        HTTPException: If paper not found
     """
     paper = db.query(Paper).filter(Paper.id == paper_id).first()
 
@@ -459,13 +422,6 @@ def delete_paper(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Paper not found"
-        )
-
-    # Check ownership
-    if paper.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to delete this paper"
         )
 
     db.delete(paper)

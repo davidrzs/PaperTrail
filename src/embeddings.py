@@ -1,14 +1,10 @@
-"""Embedding generation using EmbeddingGemma model"""
+"""Embedding generation using Nomic Embed Text v1.5 model"""
 
-import os
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from typing import Optional
 
 from src.config import settings
-
-# Load HF token from environment
-HF_TOKEN = os.getenv("HF_TOKEN")
 
 # Global model instance (loaded once on startup)
 _model: Optional[SentenceTransformer] = None
@@ -16,7 +12,7 @@ _model: Optional[SentenceTransformer] = None
 
 def load_model() -> SentenceTransformer:
     """
-    Load the EmbeddingGemma model.
+    Load the Nomic Embed Text v1.5 model.
 
     This should be called once on application startup.
     The model is cached globally for subsequent calls.
@@ -27,7 +23,7 @@ def load_model() -> SentenceTransformer:
         print(f"Loading embedding model: {settings.embedding_model}")
         _model = SentenceTransformer(
             settings.embedding_model,
-            token=HF_TOKEN
+            trust_remote_code=True
         )
         print(f"Model loaded successfully. Embedding dimension: {_model.get_sentence_embedding_dimension()}")
 
@@ -43,9 +39,10 @@ def get_model() -> SentenceTransformer:
 
 def generate_embedding(text: str) -> np.ndarray:
     """
-    Generate embedding for a query text using EmbeddingGemma.
+    Generate embedding for a query text using Nomic Embed Text v1.5.
 
-    Model automatically truncates to 2048 tokens if input is too long.
+    Model supports up to 8192 tokens without truncation.
+    Uses task-specific prefix for better retrieval performance.
 
     Args:
         text: Input query text to embed
@@ -55,9 +52,10 @@ def generate_embedding(text: str) -> np.ndarray:
     """
     model = get_model()
 
-    # Use encode_query for query text (applies task-specific prompt)
-    # Model handles truncation at token level automatically
-    embedding = model.encode_query(text)
+    # Add task prefix for query embedding (required by Nomic models)
+    prefixed_text = f"search_query: {text}"
+
+    embedding = model.encode(prefixed_text, convert_to_numpy=True, show_progress_bar=False)
 
     return embedding
 
@@ -66,7 +64,8 @@ def generate_paper_embedding(abstract: Optional[str], summary: str) -> np.ndarra
     """
     Generate embedding for a paper by combining abstract and summary.
 
-    Model automatically truncates to 2048 tokens if input is too long.
+    Model supports up to 8192 tokens without truncation.
+    Uses task-specific prefix for better retrieval performance.
 
     Args:
         abstract: Optional paper abstract
@@ -85,9 +84,10 @@ def generate_paper_embedding(abstract: Optional[str], summary: str) -> np.ndarra
 
     text = "\n\n".join(parts)
 
-    # Use encode_document for paper text (applies document-specific prompt)
-    # Model handles truncation at token level automatically
-    embedding = model.encode_document(text)
+    # Add task prefix for document embedding (required by Nomic models)
+    prefixed_text = f"search_document: {text}"
+
+    embedding = model.encode(prefixed_text, convert_to_numpy=True, show_progress_bar=False)
 
     return embedding
 

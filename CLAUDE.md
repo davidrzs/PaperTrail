@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-PaperTrail is a personal paper reading tracker with hybrid search (SQLite FTS5 + vector embeddings). FastAPI backend serving both API endpoints and HTML templates with Jinja2. Uses SQLite with FTS5 for full-text search and brute-force cosine similarity for semantic vector search using google/embeddinggemma-300m, combined via Reciprocal Rank Fusion (RRF). Database initialization via `init_db()` function with automatic FTS5 trigger setup.
+PaperTrail is a personal paper reading tracker with hybrid search (SQLite FTS5 + vector embeddings). FastAPI backend serving both API endpoints and HTML templates with Jinja2. Uses SQLite with FTS5 for full-text search and brute-force cosine similarity for semantic vector search using nomic-ai/nomic-embed-text-v1.5, combined via Reciprocal Rank Fusion (RRF). Database initialization via `init_db()` function with automatic FTS5 trigger setup.
 
 ## Quick Start
 
@@ -16,7 +16,7 @@ uv sync
 make dev
 
 # Visit http://localhost:8000
-# First user to register becomes the single user (if SINGLE_USER=true)
+# Login with credentials from .env (ADMIN_USERNAME and ADMIN_PASSWORD)
 ```
 
 ## Development Commands
@@ -78,17 +78,18 @@ Privacy filtering happens at SQL level in both FTS and vector search. RRF consta
 
 ### Embedding System (`src/embeddings.py`)
 - Global `_model` loaded once on startup (heavy operation)
-- google/embeddinggemma-300m produces embeddings
-- Papers embed: abstract + summary concatenated
-- Query embeds: use `prompt_name="query"` for better retrieval
+- nomic-ai/nomic-embed-text-v1.5 produces 768-dimensional embeddings
+- Supports up to 8192 tokens without truncation (handles long papers)
+- Papers embed: abstract + summary concatenated with `search_document:` prefix
+- Queries embed: search text with `search_query:` prefix
+- Task prefixes required for optimal retrieval performance
 - Embeddings stored as bytes blob (numpy array via `tobytes()`)
 - Retrieved via `np.frombuffer()` for similarity computation
 
 ### Router Structure (`src/routers/`)
-- `auth.py` - HTTP-only session cookies (JWT stored in cookie)
+- `auth.py` - Login/logout with env credentials, HTTP-only session cookies (JWT)
 - `papers.py` - CRUD + search endpoints + HTML template routes
-- `tags.py` - Per-user tags with autocomplete
-- `users.py` - User profiles and RSS feeds
+- `tags.py` - Tag management with autocomplete
 
 ### Template System
 - Base: `src/templates/base.html` with `.content` wrapper (max-width: 1200px, padding: 32px 24px)
@@ -98,10 +99,10 @@ Privacy filtering happens at SQL level in both FTS and vector search. RRF consta
 - ALL CSS: `src/static/css/style.css` (no `<style>` blocks in templates)
 
 ### Models (`src/models.py`)
-- User → Papers (one-to-many, cascade delete)
-- User → Tags (one-to-many, cascade delete)
+- Paper: Stores paper metadata, abstract, summary, privacy flag
+- Tag: Global tags (no user_id), unique by name
 - Papers ↔ Tags (many-to-many via `paper_tags` table)
-- Paper → Embedding (one-to-one, cascade delete)
+- Embedding: One-to-one with Paper (cascade delete)
 - Embedding stores `embedding_vector` as bytes blob (not pgvector type)
 
 ## Testing
@@ -127,10 +128,10 @@ When creating a paper (`POST /papers`):
 
 ### Privacy Model
 - Papers have `is_private` flag
-- Search functions accept `user_id` parameter
-- FTS search: SQL filter `(is_private = 0 OR user_id = :user_id)`
-- Vector search: JOIN with papers table applying same filter
-- Anonymous users see only public papers
+- Search functions accept `is_authenticated` parameter (boolean)
+- FTS search: SQL filter `is_private = 0` for anonymous, all papers if authenticated
+- Vector search: Same privacy filtering logic
+- Anonymous users see only public papers, authenticated user sees all
 
 ### Embedding Storage
 Embeddings stored as bytes blob:
@@ -147,28 +148,31 @@ Environment configuration via `.env`:
 - `DATABASE_URL` - SQLite file path (default: `sqlite:///./data/papertrail.db`)
 - `SECRET_KEY` - JWT signing key (must change in production)
 - `DEBUG` - Development mode flag (default: false)
-- `SINGLE_USER` - Single-user mode flag (default: false)
+- `ADMIN_USERNAME` - Single user login username (REQUIRED)
+- `ADMIN_PASSWORD` - Single user login password (REQUIRED, can be plain text or Argon2 hash)
 
 All other settings hardcoded in `src/config.py`:
-- Embedding model: `google/embeddinggemma-300m`
+- Embedding model: `nomic-ai/nomic-embed-text-v1.5`
 - Token expiry: 30 minutes
 - Search limit: 50 results
 - RRF constant: k=60
 - Rate limit: 60 requests/minute
 
-## Single-User Mode
+## Single-User System
 
-When `SINGLE_USER=true`:
-- Registration blocked after first user (403 error)
-- `/register` page redirects to `/login`
-- "Register" link hidden in navigation
-- Root `/` redirects to `/papers` when logged in
-- Login/logout work normally
+This is a true single-user system with no user database table:
+- No registration endpoint - credentials configured via environment variables
+- Login validates against `ADMIN_USERNAME` and `ADMIN_PASSWORD` from `.env`
+- Password can be plain text (not recommended) or Argon2 hash
+- All papers belong to the single user (no user_id foreign key)
+- Tags are global (no per-user scoping)
+- Privacy flag still exists for public/private papers
+- Authenticated user sees all papers, anonymous users see only public
 
 Implementation details:
-- `src/routers/auth.py`: Checks user count before allowing registration
-- `src/main.py`: Redirects register page, adds root redirect, sets global template var
-- `src/templates/base.html`: JavaScript conditionally hides register link
+- `src/auth.py`: `authenticate_admin()` validates against env credentials
+- `src/routers/auth.py`: Only login/logout endpoints (no registration)
+- `src/models.py`: No User model, Paper/Tag have no user_id
 - Designed for personal/single-user deployments
 
 ## Frontend Conventions
@@ -209,19 +213,20 @@ make docker-run
 
 ### Environment Variables for Production
 1. `SECRET_KEY` - Generate with: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
-2. `SINGLE_USER=true` - For personal deployments
-3. `DEBUG=false`
+2. `ADMIN_USERNAME` - Your login username
+3. `ADMIN_PASSWORD` - Your login password (can be Argon2 hash for added security)
+4. `DEBUG=false`
 
 ### Dokploy Deployment
 1. Deploy single Dockerfile (no docker-compose needed)
 2. Add volume mount: Container path `/app/data`
-3. Set environment variables in Dokploy UI (SECRET_KEY, SINGLE_USER)
+3. Set environment variables in Dokploy UI (SECRET_KEY, ADMIN_USERNAME, ADMIN_PASSWORD)
 4. Database persists in named volume automatically
 
 ### Production Checklist
 1. Set strong `SECRET_KEY` environment variable
-2. Ensure `DEBUG=false` in `.env`
-3. Set `SINGLE_USER=true` for personal use
+2. Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` in environment
+3. Ensure `DEBUG=false` in `.env`
 4. Set `secure=True` for cookies in `src/routers/auth.py` (requires HTTPS)
 5. Update CORS origins in `src/main.py` (remove `allow_origins=["*"]`)
 6. Ensure volume is configured for `/app/data` to persist database

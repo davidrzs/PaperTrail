@@ -68,7 +68,7 @@ class TestEmbeddings:
 class TestPaperCreationWithEmbeddings:
     """Test that embeddings are automatically generated when creating papers"""
 
-    def test_create_paper_generates_embedding(self, client: TestClient, auth_headers, db_session):
+    def test_create_paper_generates_embedding(self, authenticated_client: TestClient, db_session):
         """Test that creating a paper automatically generates and stores an embedding"""
         paper_data = {
             "title": "Attention Is All You Need",
@@ -79,7 +79,7 @@ class TestPaperCreationWithEmbeddings:
             "is_private": False
         }
 
-        response = client.post("/papers", json=paper_data, headers=auth_headers)
+        response = authenticated_client.post("/papers", json=paper_data)
         assert response.status_code == 201
 
         paper_id = response.json()["id"]
@@ -95,7 +95,7 @@ class TestPaperCreationWithEmbeddings:
         embedding_array = np.frombuffer(embedding.embedding_vector, dtype=np.float32)
         assert embedding_array.shape[0] == 768
 
-    def test_create_paper_without_abstract_generates_embedding(self, client: TestClient, auth_headers, db_session):
+    def test_create_paper_without_abstract_generates_embedding(self, authenticated_client: TestClient, db_session):
         """Test that papers without abstracts still generate embeddings"""
         paper_data = {
             "title": "Short Paper Without Abstract",
@@ -105,7 +105,7 @@ class TestPaperCreationWithEmbeddings:
             "is_private": False
         }
 
-        response = client.post("/papers", json=paper_data, headers=auth_headers)
+        response = authenticated_client.post("/papers", json=paper_data)
         assert response.status_code == 201
 
         paper_id = response.json()["id"]
@@ -120,11 +120,10 @@ class TestPaperCreationWithEmbeddings:
 class TestFTSSearch:
     """Test full-text search functionality"""
 
-    def test_fts_search_finds_exact_match(self, db_session, test_user_obj):
+    def test_fts_search_finds_exact_match(self, db_session):
         """Test FTS5 search finds papers with exact keyword matches"""
         # Create test papers
         paper1 = Paper(
-            user_id=test_user_obj.id,
             title="Deep Learning with Neural Networks",
             authors="Smith et al.",
             abstract="This paper explores deep neural networks",
@@ -132,7 +131,6 @@ class TestFTSSearch:
             is_private=False
         )
         paper2 = Paper(
-            user_id=test_user_obj.id,
             title="Quantum Computing Basics",
             authors="Jones et al.",
             abstract="Introduction to quantum algorithms",
@@ -142,17 +140,16 @@ class TestFTSSearch:
         db_session.add_all([paper1, paper2])
         db_session.commit()
 
-        # Search for "neural"
-        results = fts_search(db_session, "neural", limit=10)
+        # Search for "neural" - authenticated user sees all papers
+        results = fts_search(db_session, "neural", limit=10, is_authenticated=True)
 
         assert len(results) > 0
         assert paper1.id in results
         assert paper2.id not in results
 
-    def test_fts_search_multi_word_query(self, db_session, test_user_obj):
+    def test_fts_search_multi_word_query(self, db_session):
         """Test FTS5 search with multi-word queries"""
         paper = Paper(
-            user_id=test_user_obj.id,
             title="Transformer Architecture for NLP",
             authors="Brown et al.",
             abstract="We present a novel transformer-based approach",
@@ -163,22 +160,20 @@ class TestFTSSearch:
         db_session.commit()
 
         # Search for multiple words
-        results = fts_search(db_session, "transformer nlp", limit=10)
+        results = fts_search(db_session, "transformer nlp", limit=10, is_authenticated=True)
 
         assert len(results) > 0
         assert paper.id in results
 
-    def test_fts_search_respects_privacy(self, db_session, test_user_obj, test_user2):
+    def test_fts_search_respects_privacy(self, db_session):
         """Test that FTS search respects privacy settings"""
         public_paper = Paper(
-            user_id=test_user_obj.id,
             title="Public Neural Network Paper",
             authors="Smith",
             summary="Public research on neural networks",
             is_private=False
         )
         private_paper = Paper(
-            user_id=test_user_obj.id,
             title="Private Neural Network Paper",
             authors="Smith",
             summary="Private research on neural networks",
@@ -187,30 +182,24 @@ class TestFTSSearch:
         db_session.add_all([public_paper, private_paper])
         db_session.commit()
 
-        # Search without user_id (anonymous) - should only find public
-        results = fts_search(db_session, "neural", limit=10, user_id=None)
+        # Search without authentication (is_authenticated=False) - should only find public
+        results = fts_search(db_session, "neural", limit=10, is_authenticated=False)
         assert public_paper.id in results
         assert private_paper.id not in results
 
-        # Search with owner user_id - should find both
-        results = fts_search(db_session, "neural", limit=10, user_id=test_user_obj.id)
+        # Search with authentication (is_authenticated=True) - should find both
+        results = fts_search(db_session, "neural", limit=10, is_authenticated=True)
         assert public_paper.id in results
         assert private_paper.id in results
-
-        # Search with different user_id - should only find public
-        results = fts_search(db_session, "neural", limit=10, user_id=test_user2.id)
-        assert public_paper.id in results
-        assert private_paper.id not in results
 
 
 class TestVectorSearch:
     """Test vector similarity search functionality"""
 
-    def test_vector_search_finds_semantic_matches(self, db_session, test_user_obj):
+    def test_vector_search_finds_semantic_matches(self, db_session):
         """Test vector search finds semantically similar papers"""
         # Create papers with semantically related content
         paper1 = Paper(
-            user_id=test_user_obj.id,
             title="Neural Networks for Image Recognition",
             authors="Lee et al.",
             abstract="Convolutional neural networks for computer vision",
@@ -218,7 +207,6 @@ class TestVectorSearch:
             is_private=False
         )
         paper2 = Paper(
-            user_id=test_user_obj.id,
             title="Quantum Cryptography Protocols",
             authors="Wang et al.",
             abstract="Secure communication using quantum mechanics",
@@ -242,7 +230,7 @@ class TestVectorSearch:
 
         # Search for "deep learning for vision tasks"
         query_embedding = generate_embedding("deep learning for vision tasks")
-        results = vector_search(db_session, query_embedding, limit=10, user_id=None)
+        results = vector_search(db_session, query_embedding, limit=10, is_authenticated=True)
 
         # Should find paper1 with higher rank than paper2
         paper_ids = [paper_id for paper_id, distance in results]
@@ -254,17 +242,15 @@ class TestVectorSearch:
             idx2 = paper_ids.index(paper2.id)
             assert idx1 < idx2
 
-    def test_vector_search_respects_privacy(self, db_session, test_user_obj, test_user2):
+    def test_vector_search_respects_privacy(self, db_session):
         """Test that vector search respects privacy settings"""
         public_paper = Paper(
-            user_id=test_user_obj.id,
             title="Public ML Paper",
             authors="Smith",
             summary="Machine learning techniques",
             is_private=False
         )
         private_paper = Paper(
-            user_id=test_user_obj.id,
             title="Private ML Paper",
             authors="Smith",
             summary="Machine learning techniques",
@@ -287,23 +273,17 @@ class TestVectorSearch:
 
         query_embedding = generate_embedding("machine learning")
 
-        # Anonymous search - only public
-        results = vector_search(db_session, query_embedding, limit=10, user_id=None)
+        # Anonymous search (is_authenticated=False) - only public
+        results = vector_search(db_session, query_embedding, limit=10, is_authenticated=False)
         paper_ids = [paper_id for paper_id, distance in results]
         assert public_paper.id in paper_ids
         assert private_paper.id not in paper_ids
 
-        # Owner search - both
-        results = vector_search(db_session, query_embedding, limit=10, user_id=test_user_obj.id)
+        # Authenticated search (is_authenticated=True) - both
+        results = vector_search(db_session, query_embedding, limit=10, is_authenticated=True)
         paper_ids = [paper_id for paper_id, distance in results]
         assert public_paper.id in paper_ids
         assert private_paper.id in paper_ids
-
-        # Different user - only public
-        results = vector_search(db_session, query_embedding, limit=10, user_id=test_user2.id)
-        paper_ids = [paper_id for paper_id, distance in results]
-        assert public_paper.id in paper_ids
-        assert private_paper.id not in paper_ids
 
 
 class TestRRF:
@@ -344,11 +324,10 @@ class TestRRF:
 class TestHybridSearch:
     """Test hybrid search combining FTS and vector search"""
 
-    def test_hybrid_search_combines_both_methods(self, db_session, test_user_obj):
+    def test_hybrid_search_combines_both_methods(self, db_session):
         """Test hybrid search uses both FTS and vector search"""
         # Create papers that would rank differently in FTS vs vector search
         paper1 = Paper(
-            user_id=test_user_obj.id,
             title="Transformer transformer transformer",  # High FTS score for "transformer"
             authors="Smith",
             abstract="This paper uses transformers extensively",
@@ -356,7 +335,6 @@ class TestHybridSearch:
             is_private=False
         )
         paper2 = Paper(
-            user_id=test_user_obj.id,
             title="Attention Mechanisms in Neural Networks",  # High semantic similarity
             authors="Jones",
             abstract="Self-attention and multi-head attention for sequence modeling",
@@ -379,24 +357,22 @@ class TestHybridSearch:
         db_session.commit()
 
         # Search for "transformer architecture"
-        results = hybrid_search(db_session, "transformer architecture", limit=10, user_id=None)
+        results = hybrid_search(db_session, "transformer architecture", limit=10, is_authenticated=True)
 
         # Should return both papers with RRF scores
         assert len(results) > 0
         paper_ids = [paper_id for paper_id, score in results]
         assert paper1.id in paper_ids or paper2.id in paper_ids
 
-    def test_hybrid_search_respects_privacy(self, db_session, test_user_obj, test_user2):
+    def test_hybrid_search_respects_privacy(self, db_session):
         """Test hybrid search respects privacy settings"""
         public_paper = Paper(
-            user_id=test_user_obj.id,
             title="Public Research on Transformers",
             authors="Smith",
             summary="Public transformer research",
             is_private=False
         )
         private_paper = Paper(
-            user_id=test_user_obj.id,
             title="Private Research on Transformers",
             authors="Smith",
             summary="Private transformer research",
@@ -417,14 +393,14 @@ class TestHybridSearch:
             db_session.add(db_embedding)
         db_session.commit()
 
-        # Anonymous search
-        results = hybrid_search(db_session, "transformer", limit=10, user_id=None)
+        # Anonymous search (is_authenticated=False)
+        results = hybrid_search(db_session, "transformer", limit=10, is_authenticated=False)
         paper_ids = [paper_id for paper_id, score in results]
         assert public_paper.id in paper_ids
         assert private_paper.id not in paper_ids
 
-        # Owner search
-        results = hybrid_search(db_session, "transformer", limit=10, user_id=test_user_obj.id)
+        # Authenticated search (is_authenticated=True)
+        results = hybrid_search(db_session, "transformer", limit=10, is_authenticated=True)
         paper_ids = [paper_id for paper_id, score in results]
         assert public_paper.id in paper_ids
         assert private_paper.id in paper_ids
@@ -433,11 +409,10 @@ class TestHybridSearch:
 class TestSearchAPI:
     """Test the search API endpoint"""
 
-    def test_search_endpoint_returns_json_for_api(self, client: TestClient, auth_headers, db_session, test_user_obj):
+    def test_search_endpoint_returns_json_for_api(self, authenticated_client: TestClient, db_session):
         """Test search endpoint returns JSON for regular API calls"""
         # Create test paper
         paper = Paper(
-            user_id=test_user_obj.id,
             title="Neural Network Research",
             authors="Test Author",
             summary="Research on neural networks and deep learning",
@@ -458,7 +433,7 @@ class TestSearchAPI:
         db_session.commit()
 
         # Make API request (no HX-Request header)
-        response = client.get("/papers/search?q=neural+networks", headers=auth_headers)
+        response = authenticated_client.get("/papers/search?q=neural+networks")
 
         if response.status_code != 200:
             print(f"Response status: {response.status_code}")
@@ -473,11 +448,10 @@ class TestSearchAPI:
         assert data["query"] == "neural networks"
         assert isinstance(data["results"], list)
 
-    def test_search_endpoint_returns_html_for_htmx(self, client: TestClient, auth_headers, db_session, test_user_obj):
+    def test_search_endpoint_returns_html_for_htmx(self, authenticated_client: TestClient, db_session):
         """Test search endpoint returns HTML for HTMX requests"""
         # Create test paper
         paper = Paper(
-            user_id=test_user_obj.id,
             title="Machine Learning Basics",
             authors="Test Author",
             summary="Introduction to machine learning concepts",
@@ -498,8 +472,10 @@ class TestSearchAPI:
         db_session.commit()
 
         # Make HTMX request
-        headers = {**auth_headers, "HX-Request": "true"}
-        response = client.get("/papers/search?q=machine+learning", headers=headers)
+        response = authenticated_client.get(
+            "/papers/search?q=machine+learning",
+            headers={"HX-Request": "true"}
+        )
 
         assert response.status_code == 200
         assert "text/html" in response.headers.get("content-type", "")
@@ -508,9 +484,9 @@ class TestSearchAPI:
         html = response.text
         assert "papers-list" in html or "search-info" in html
 
-    def test_search_with_no_results(self, client: TestClient, auth_headers):
+    def test_search_with_no_results(self, authenticated_client: TestClient):
         """Test search returns appropriate response when no results found"""
-        response = client.get("/papers/search?q=nonexistentquery12345", headers=auth_headers)
+        response = authenticated_client.get("/papers/search?q=nonexistentquery12345")
 
         assert response.status_code == 200
         data = response.json()
@@ -518,12 +494,11 @@ class TestSearchAPI:
         assert data["total"] == 0
         assert len(data["results"]) == 0
 
-    def test_search_respects_limit_parameter(self, client: TestClient, auth_headers, db_session, test_user_obj):
+    def test_search_respects_limit_parameter(self, authenticated_client: TestClient, db_session):
         """Test search respects the limit parameter"""
         # Create multiple papers
         for i in range(5):
             paper = Paper(
-                user_id=test_user_obj.id,
                 title=f"Neural Network Paper {i}",
                 authors="Test Author",
                 summary="Research on neural networks",
@@ -546,7 +521,7 @@ class TestSearchAPI:
         db_session.commit()
 
         # Search with limit
-        response = client.get("/papers/search?q=neural&limit=2", headers=auth_headers)
+        response = authenticated_client.get("/papers/search?q=neural&limit=2")
 
         assert response.status_code == 200
         data = response.json()

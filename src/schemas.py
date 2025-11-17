@@ -113,11 +113,9 @@ class PaperUpdate(BaseModel):
 class PaperResponse(PaperBase):
     """Schema for paper responses"""
     id: int
-    user_id: int
     created_at: datetime
     updated_at: datetime
     tags: List[TagResponse] = []
-    user: UserPublic
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -132,7 +130,6 @@ class PaperListItem(BaseModel):
     date_read: Optional[date] = None
     created_at: datetime
     tags: List[TagResponse] = []
-    user: UserPublic
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -154,7 +151,6 @@ class SearchResult(BaseModel):
     summary: str
     score: float  # RRF score
     tags: List[TagResponse] = []
-    user: UserPublic
 
     model_config = ConfigDict(from_attributes=True)
 

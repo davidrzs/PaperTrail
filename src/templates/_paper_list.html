@@ -21,8 +21,6 @@
         <!-- Authors and Metadata -->
         <div class="paper-meta">
             <span class="authors">{{ paper.authors }}</span>
-            <span class="meta-separator">•</span>
-            <span class="meta-item">by <a href="/users/{{ paper.user.username }}/feed">{{ paper.user.display_name or paper.user.username }}</a></span>
             {% if paper.date_read %}
             <span class="meta-separator">•</span>
             <span class="date">{{ paper.date_read.strftime('%d-%m-%Y') }}</span>
@@ -31,7 +29,7 @@
             <span class="meta-separator">•</span>
             <span class="private-badge">Private</span>
             {% endif %}
-            {% if current_user and current_user.id == paper.user_id and show_actions %}
+            {% if is_authenticated and show_actions %}
             <span class="meta-separator">•</span>
             <a href="/papers/{{ paper.id }}/edit" class="action-link">edit</a>
             <span class="meta-separator">•</span>

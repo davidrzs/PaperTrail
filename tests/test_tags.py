@@ -4,14 +4,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-def test_list_tags_empty(client: TestClient, test_user: dict):
-    """Test listing tags when user has no papers"""
-    response = client.get("/tags", headers=test_user["headers"])
+def test_list_tags_empty(authenticated_client: TestClient):
+    """Test listing tags when there are no papers"""
+    response = authenticated_client.get("/tags")
     assert response.status_code == 200
     assert response.json() == []
 
 
-def test_list_tags_with_papers(client: TestClient, test_user: dict):
+def test_list_tags_with_papers(authenticated_client: TestClient):
     """Test listing tags after creating papers"""
     # Create papers with tags
     paper1 = {
@@ -27,11 +27,11 @@ def test_list_tags_with_papers(client: TestClient, test_user: dict):
         "tags": ["ml", "nlp"]
     }
 
-    client.post("/papers", json=paper1, headers=test_user["headers"])
-    client.post("/papers", json=paper2, headers=test_user["headers"])
+    authenticated_client.post("/papers", json=paper1)
+    authenticated_client.post("/papers", json=paper2)
 
     # List tags
-    response = client.get("/tags", headers=test_user["headers"])
+    response = authenticated_client.get("/tags")
     assert response.status_code == 200
 
     tags = response.json()
@@ -42,43 +42,34 @@ def test_list_tags_with_papers(client: TestClient, test_user: dict):
     assert ml_tag["count"] == 2  # Used in 2 papers
 
 
-def test_tags_are_per_user(client: TestClient, test_user: dict, second_user: dict):
-    """Test that tags are per-user"""
-    # User 1 creates a paper with tag "mytag"
-    test_user["login"]()
+def test_tags_are_global(authenticated_client: TestClient):
+    """Test that tags are global (not per-user in single-user system)"""
+    # Create papers with the same tag name
     paper1 = {
         "title": "Paper 1",
         "authors": "Author",
         "summary": "Summary",
         "tags": ["mytag"]
     }
-    client.post("/papers", json=paper1)
-
-    # User 2 creates a paper with tag "mytag" (separate tag)
-    second_user["login"]()
     paper2 = {
         "title": "Paper 2",
         "authors": "Author",
         "summary": "Summary",
         "tags": ["mytag"]
     }
-    client.post("/papers", json=paper2)
 
-    # Each user should see only their own tag
-    test_user["login"]()
-    response1 = client.get("/tags")
-    tags1 = response1.json()
-    assert len(tags1) == 1
-    assert tags1[0]["count"] == 1
+    authenticated_client.post("/papers", json=paper1)
+    authenticated_client.post("/papers", json=paper2)
 
-    second_user["login"]()
-    response2 = client.get("/tags")
-    tags2 = response2.json()
-    assert len(tags2) == 1
-    assert tags2[0]["count"] == 1
+    # Should see one tag used in 2 papers
+    response = authenticated_client.get("/tags")
+    tags = response.json()
+    assert len(tags) == 1
+    assert tags[0]["name"] == "mytag"
+    assert tags[0]["count"] == 2  # Used in both papers
 
 
-def test_autocomplete_tags(client: TestClient, test_user: dict):
+def test_autocomplete_tags(authenticated_client: TestClient):
     """Test tag autocomplete"""
     # Create papers with tags
     paper1 = {
@@ -87,10 +78,10 @@ def test_autocomplete_tags(client: TestClient, test_user: dict):
         "summary": "Summary",
         "tags": ["machine-learning", "ml", "transformers"]
     }
-    client.post("/papers", json=paper1, headers=test_user["headers"])
+    authenticated_client.post("/papers", json=paper1)
 
     # Autocomplete with prefix "m"
-    response = client.get("/tags/autocomplete?q=m", headers=test_user["headers"])
+    response = authenticated_client.get("/tags/autocomplete?q=m")
     assert response.status_code == 200
 
     suggestions = response.json()["suggestions"]
@@ -105,7 +96,7 @@ def test_autocomplete_tags_unauthorized(client: TestClient):
     assert response.status_code == 401
 
 
-def test_tag_case_normalization(client: TestClient, test_user: dict):
+def test_tag_case_normalization(authenticated_client: TestClient):
     """Test that tags are normalized to lowercase"""
     paper = {
         "title": "Paper",
@@ -114,7 +105,7 @@ def test_tag_case_normalization(client: TestClient, test_user: dict):
         "tags": ["ML", "Transformers", "NLP"]
     }
 
-    response = client.post("/papers", json=paper, headers=test_user["headers"])
+    response = authenticated_client.post("/papers", json=paper)
     assert response.status_code == 201
 
     tags = response.json()["tags"]
@@ -123,3 +114,9 @@ def test_tag_case_normalization(client: TestClient, test_user: dict):
     assert "transformers" in tag_names
     assert "nlp" in tag_names
     assert "ML" not in tag_names  # Should be lowercase
+
+
+def test_list_tags_unauthorized(client: TestClient):
+    """Test that listing tags requires authentication"""
+    response = client.get("/tags")
+    assert response.status_code == 401

@@ -6,9 +6,9 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from src.auth import get_current_user
+from src.auth import require_auth
 from src.database import get_db
-from src.models import Tag, User, Paper, paper_tags
+from src.models import Tag, Paper, paper_tags
 from src.schemas import TagResponse
 
 router = APIRouter(prefix="/tags", tags=["tags"])
@@ -16,14 +16,14 @@ router = APIRouter(prefix="/tags", tags=["tags"])
 
 @router.get("", response_model=List[TagResponse])
 def list_tags(
-    current_user: User = Depends(get_current_user),
+    _: bool = Depends(require_auth),
     db: Session = Depends(get_db)
 ):
     """
-    List all tags for the current user with paper counts.
+    List all tags with paper counts.
 
     Args:
-        current_user: Authenticated user
+        _: Authentication check
         db: Database session
 
     Returns:
@@ -36,7 +36,6 @@ def list_tags(
             Tag.name,
             func.count(paper_tags.c.paper_id).label("count")
         )
-        .filter(Tag.user_id == current_user.id)
         .outerjoin(paper_tags, Tag.id == paper_tags.c.tag_id)
         .group_by(Tag.id, Tag.name)
         .order_by(Tag.name)
@@ -52,15 +51,15 @@ def list_tags(
 @router.get("/autocomplete")
 def autocomplete_tags(
     q: str = Query(..., min_length=1, description="Tag prefix to search"),
-    current_user: User = Depends(get_current_user),
+    _: bool = Depends(require_auth),
     db: Session = Depends(get_db)
 ):
     """
-    Autocomplete tag suggestions for the current user.
+    Autocomplete tag suggestions.
 
     Args:
         q: Tag prefix to search
-        current_user: Authenticated user
+        _: Authentication check
         db: Database session
 
     Returns:
@@ -68,10 +67,7 @@ def autocomplete_tags(
     """
     tags = (
         db.query(Tag.name)
-        .filter(
-            Tag.user_id == current_user.id,
-            Tag.name.like(f"{q.lower()}%")
-        )
+        .filter(Tag.name.like(f"{q.lower()}%"))
         .distinct()
         .limit(10)
         .all()

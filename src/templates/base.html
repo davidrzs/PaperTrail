@@ -56,35 +56,27 @@
     <script>
     // Check if user is logged in and update nav
     const authLinksContainer = document.getElementById('auth-links');
-    const singleUserMode = {{ 'true' if single_user else 'false' }};
 
-    // Fetch current user (cookie is sent automatically)
-    fetch('/auth/me')
-        .then(res => res.ok ? res.json() : null)
-        .then(user => {
-            if (user) {
+    // Check if authenticated by checking if cookie exists
+    // (simple check - just try to access a protected endpoint)
+    fetch('/tags')
+        .then(res => {
+            if (res.ok) {
+                // Authenticated - show logged-in links
                 authLinksContainer.innerHTML = `
+                    <a href="/papers">papers</a>
                     <a href="/papers/new">add paper</a>
-                    <a href="/users/${user.username}/feed">my feed</a>
-                    <a href="/settings">settings</a>
+                    <a href="/settings">profile</a>
                     <a href="#" onclick="logout(); return false;">logout</a>
                 `;
             } else {
-                // Hide register link in single-user mode
-                if (singleUserMode) {
-                    authLinksContainer.innerHTML = `<a href="/login">login</a>`;
-                } else {
-                    authLinksContainer.innerHTML = `<a href="/login">login</a><a href="/register">register</a>`;
-                }
+                // Not authenticated - show login link
+                authLinksContainer.innerHTML = `<a href="/login">login</a>`;
             }
         })
         .catch(() => {
-            // Hide register link in single-user mode
-            if (singleUserMode) {
-                authLinksContainer.innerHTML = `<a href="/login">login</a>`;
-            } else {
-                authLinksContainer.innerHTML = `<a href="/login">login</a><a href="/register">register</a>`;
-            }
+            // Error - show login link
+            authLinksContainer.innerHTML = `<a href="/login">login</a>`;
         });
 
     async function logout() {

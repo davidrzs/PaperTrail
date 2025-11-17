@@ -9,7 +9,7 @@ from src.embeddings import generate_embedding
 from src.models import Paper
 
 
-def fts_search(db: Session, query: str, limit: int = 50, user_id: Optional[int] = None) -> List[int]:
+def fts_search(db: Session, query: str, limit: int = 50, is_authenticated: bool = False) -> List[int]:
     """
     Perform full-text search using SQLite FTS5.
 
@@ -17,25 +17,26 @@ def fts_search(db: Session, query: str, limit: int = 50, user_id: Optional[int] 
         db: Database session
         query: Search query
         limit: Maximum number of results
-        user_id: Optional user ID to include their private papers
+        is_authenticated: Whether user is authenticated (shows all papers if True)
 
     Returns:
         List of paper IDs ordered by relevance
     """
     # Use FTS5 MATCH for full-text search, then filter by privacy
-    if user_id is not None:
+    if is_authenticated:
+        # Authenticated user sees all papers
         result = db.execute(
             text("""
                 SELECT papers_fts.rowid FROM papers_fts
                 JOIN papers ON papers.id = papers_fts.rowid
                 WHERE papers_fts MATCH :query
-                  AND (papers.is_private = 0 OR papers.user_id = :user_id)
                 ORDER BY rank
                 LIMIT :limit
             """),
-            {"query": query, "limit": limit, "user_id": user_id}
+            {"query": query, "limit": limit}
         )
     else:
+        # Anonymous users see only public papers
         result = db.execute(
             text("""
                 SELECT papers_fts.rowid FROM papers_fts
@@ -55,7 +56,7 @@ def vector_search(
     db: Session,
     query_embedding: np.ndarray,
     limit: int = 50,
-    user_id: Optional[int] = None
+    is_authenticated: bool = False
 ) -> List[Tuple[int, float]]:
     """
     Perform vector similarity search.
@@ -67,7 +68,7 @@ def vector_search(
         db: Database session
         query_embedding: Query embedding vector
         limit: Maximum number of results
-        user_id: Optional user ID to include their private papers
+        is_authenticated: Whether user is authenticated (shows all papers if True)
 
     Returns:
         List of (paper_id, distance) tuples ordered by similarity
@@ -77,12 +78,12 @@ def vector_search(
     # Get all embeddings from database
     embeddings_query = db.query(Embedding.paper_id, Embedding.embedding_vector)
 
-    # Filter by visibility if user_id provided
-    if user_id is not None:
-        embeddings_query = embeddings_query.join(Paper).filter(
-            (Paper.is_private == False) | (Paper.user_id == user_id)
-        )
+    # Filter by visibility based on authentication
+    if is_authenticated:
+        # Authenticated user sees all papers
+        embeddings_query = embeddings_query.join(Paper)
     else:
+        # Anonymous users see only public papers
         embeddings_query = embeddings_query.join(Paper).filter(Paper.is_private == False)
 
     embeddings = embeddings_query.all()
@@ -155,7 +156,7 @@ def hybrid_search(
     db: Session,
     query: str,
     limit: int = 50,
-    user_id: Optional[int] = None
+    is_authenticated: bool = False
 ) -> List[Tuple[int, float]]:
     """
     Perform hybrid search combining FTS5 and vector similarity.
@@ -164,17 +165,17 @@ def hybrid_search(
         db: Database session
         query: Search query
         limit: Maximum number of results
-        user_id: Optional user ID to include their private papers
+        is_authenticated: Whether user is authenticated (shows all papers if True)
 
     Returns:
         List of (paper_id, rrf_score) ordered by relevance
     """
     # Perform FTS search with privacy filtering
-    fts_results = fts_search(db, query, limit=limit, user_id=user_id)
+    fts_results = fts_search(db, query, limit=limit, is_authenticated=is_authenticated)
 
     # Generate query embedding and perform vector search
     query_embedding = generate_embedding(query)
-    vec_results = vector_search(db, query_embedding, limit=limit, user_id=user_id)
+    vec_results = vector_search(db, query_embedding, limit=limit, is_authenticated=is_authenticated)
 
     # Combine results with RRF
     combined_results = reciprocal_rank_fusion(fts_results, vec_results, k=60)

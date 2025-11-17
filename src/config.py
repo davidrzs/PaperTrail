@@ -13,13 +13,19 @@ class Settings(BaseSettings):
     secret_key: str = "your-secret-key-here-change-in-production"
     debug: bool = False
 
-    # Single User Mode
-    single_user: bool = False
+    # Single User Authentication
+    admin_username: str
+    admin_password: str
+
+    # Single User Profile
+    admin_display_name: str = ""  # Defaults to username if empty
+    admin_bio: str = ""
+    admin_show_heatmap: bool = True
 
     # Hardcoded application settings
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
-    embedding_model: str = "google/embeddinggemma-300m"
+    embedding_model: str = "nomic-ai/nomic-embed-text-v1.5"
     app_name: str = "PaperTrail"
     app_version: str = "0.1.0"
     rate_limit_per_minute: int = 60

@@ -1,4 +1,4 @@
-"""Authentication utilities: password hashing, JWT tokens, and dependencies"""
+"""Authentication utilities: password verification, JWT tokens, and dependencies"""
 
 from datetime import datetime, timedelta
 from typing import Optional
@@ -6,19 +6,11 @@ from typing import Optional
 from fastapi import Depends, HTTPException, Request, status
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlalchemy.orm import Session
 
 from src.config import settings
-from src.database import get_db
-from src.models import User
 
-# Password hashing context (using argon2 - more modern and secure than bcrypt)
+# Password hashing context (using argon2)
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
-
-
-def get_password_hash(password: str) -> str:
-    """Hash a password using bcrypt"""
-    return pwd_context.hash(password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -48,42 +40,41 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return encoded_jwt
 
 
-def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:
+def authenticate_admin(username: str, password: str) -> bool:
     """
-    Authenticate a user by username and password.
+    Authenticate against admin credentials from environment variables.
 
     Args:
-        db: Database session
-        username: Username
-        password: Plain text password
+        username: Username to check
+        password: Plain text password to verify
 
     Returns:
-        User object if authentication successful, None otherwise
+        True if credentials match, False otherwise
     """
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        return None
-    if not verify_password(password, user.password_hash):
-        return None
-    return user
+    if username != settings.admin_username:
+        return False
+
+    # Check if admin password is already hashed (starts with $argon2)
+    if settings.admin_password.startswith("$argon2"):
+        return verify_password(password, settings.admin_password)
+    else:
+        # Plain text password in env (not recommended but supported)
+        return password == settings.admin_password
 
 
-async def get_current_user(
-    request: Request,
-    db: Session = Depends(get_db)
-) -> User:
+async def require_auth(request: Request) -> bool:
     """
-    FastAPI dependency to get the current authenticated user from session cookie.
+    FastAPI dependency to require authentication.
+    Validates JWT token from cookie.
 
     Args:
         request: FastAPI request object (to access cookies)
-        db: Database session
 
     Returns:
-        User object
+        True if authenticated
 
     Raises:
-        HTTPException: If token is invalid or user not found
+        HTTPException: If token is invalid or missing
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -97,44 +88,49 @@ async def get_current_user(
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         username: str = payload.get("sub")
-        if username is None:
+        if username is None or username != settings.admin_username:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
 
-    user = db.query(User).filter(User.username == username).first()
-    if user is None:
-        raise credentials_exception
-
-    return user
+    return True
 
 
-async def get_current_user_optional(
-    request: Request,
-    db: Session = Depends(get_db)
-) -> Optional[User]:
+async def get_auth_status(request: Request) -> bool:
     """
-    FastAPI dependency to get the current user if authenticated, None otherwise.
-    Useful for endpoints that work differently for authenticated vs anonymous users.
+    FastAPI dependency to check if user is authenticated (optional).
+    Returns True if authenticated, False otherwise (no exception).
 
     Args:
         request: FastAPI request object (to access cookies)
-        db: Database session
 
     Returns:
-        User object if authenticated, None otherwise
+        True if authenticated, False otherwise
     """
     token = request.cookies.get("access_token")
     if not token:
-        return None
+        return False
 
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         username: str = payload.get("sub")
-        if username is None:
-            return None
-
-        user = db.query(User).filter(User.username == username).first()
-        return user
+        if username is None or username != settings.admin_username:
+            return False
+        return True
     except JWTError:
-        return None
+        return False
+
+
+def get_user_profile() -> dict:
+    """
+    Get user profile from environment configuration.
+
+    Returns:
+        Dictionary with user profile fields
+    """
+    return {
+        "username": settings.admin_username,
+        "display_name": settings.admin_display_name or settings.admin_username,
+        "bio": settings.admin_bio,
+        "show_heatmap": settings.admin_show_heatmap
+    }
