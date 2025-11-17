@@ -69,35 +69,9 @@ def health_check():
 
 # Template routes
 @app.get("/", response_class=HTMLResponse)
-async def home(
-    request: Request,
-    is_authenticated: bool = Depends(get_auth_status),
-    db: Session = Depends(get_db)
-):
-    """Home page with recent papers and statistics"""
-    from src.models import Paper
-
-    # If authenticated, redirect to papers page
-    if is_authenticated:
-        return RedirectResponse(url="/papers", status_code=302)
-
-    # Get recent public papers
-    recent_papers = db.query(Paper).filter(
-        Paper.is_private == False
-    ).order_by(Paper.created_at.desc()).limit(20).all()
-
-    # Get statistics
-    total_papers = db.query(Paper).filter(Paper.is_private == False).count()
-
-    return templates.TemplateResponse(
-        "home.html",
-        {
-            "request": request,
-            "is_authenticated": is_authenticated,
-            "recent_papers": recent_papers,
-            "total_papers": total_papers
-        }
-    )
+async def home():
+    """Home page - redirects to papers page"""
+    return RedirectResponse(url="/papers", status_code=302)
 
 
 @app.get("/login", response_class=HTMLResponse)

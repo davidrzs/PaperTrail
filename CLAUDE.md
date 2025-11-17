@@ -34,7 +34,7 @@ uv run pytest tests/ -v
 uv run pytest tests/test_auth.py -v
 
 # Run specific test
-uv run pytest tests/test_auth.py::test_register_user -v
+uv run pytest tests/test_auth.py::test_login_success -v
 ```
 
 ### Docker Deployment
@@ -219,9 +219,12 @@ make docker-run
 
 ### Dokploy Deployment
 1. Deploy single Dockerfile (no docker-compose needed)
-2. Add volume mount: Container path `/app/data`
+2. Add **Volume Mount** (NOT File Mount - those recreate on each deploy):
+   - Type: "Volume" (Docker-managed)
+   - Container Path: `/app/data`
+   - Volume Name: Auto-generated or use `papertrail-data`
 3. Set environment variables in Dokploy UI (SECRET_KEY, ADMIN_USERNAME, ADMIN_PASSWORD)
-4. Database persists in named volume automatically
+4. Database persists in Docker volume across deployments
 
 ### Production Checklist
 1. Set strong `SECRET_KEY` environment variable

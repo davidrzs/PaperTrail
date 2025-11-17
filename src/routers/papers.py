@@ -156,6 +156,8 @@ def list_papers(
     accept = request.headers.get("accept", "")
     if "text/html" in accept:
         # Return HTML page
+        from src.auth import get_user_profile
+
         filter_info = f"Tag: {tag}" if tag else "All Papers"
         return templates.TemplateResponse(
             "papers_list.html",
@@ -165,7 +167,8 @@ def list_papers(
                 "total": total,
                 "filter_info": filter_info,
                 "tag": tag,
-                "is_authenticated": is_authenticated
+                "is_authenticated": is_authenticated,
+                "user_profile": get_user_profile()
             }
         )
     else:
@@ -246,6 +249,41 @@ def search_papers(
             "query": q,
             "total": len(search_results)
         }
+
+
+@router.get("/activity")
+async def get_activity(
+    is_authenticated: bool = Depends(get_auth_status),
+    db: Session = Depends(get_db)
+):
+    """
+    Get reading activity data for heatmap.
+
+    Returns daily paper counts for the last year.
+    Shows all papers if authenticated, public only if not.
+    """
+    from datetime import datetime, timedelta
+
+    # Build query
+    query = db.query(Paper)
+
+    # Filter by visibility
+    if not is_authenticated:
+        # Anonymous users see only public papers
+        query = query.filter(Paper.is_private == False)
+
+    # Get papers with date_read in the last year
+    one_year_ago = (datetime.now() - timedelta(days=365)).date()
+    papers = query.filter(Paper.date_read >= one_year_ago).all()
+
+    # Aggregate by date
+    activity_data = {}
+    for paper in papers:
+        if paper.date_read:
+            date_str = paper.date_read.strftime('%Y-%m-%d')
+            activity_data[date_str] = activity_data.get(date_str, 0) + 1
+
+    return activity_data
 
 
 @router.get("/new", response_class=HTMLResponse)
